@@ -142,7 +142,7 @@ export function performWork(record, state, tick) {
   }
   face(entity, t);
   mem.workCalls++;
-  const speed = SKILL_MULT[record.level] ?? 1;
+  const speed = (SKILL_MULT[record.level] ?? 1) * buildingHaste(record, state);
   const requiredCalls = Math.max(1, Math.round((t.calls ?? 4) / speed));
 
   if (mem.workCalls % 2 === 0) {
@@ -218,6 +218,16 @@ function grantXp(record, entity, amount) {
       p.playSound("random.levelup", { location: entity.location });
     }
   }
+}
+
+/** M6 halls of industry: farmsteads & lumber camps speed crews +10%/level. */
+function buildingHaste(record, state) {
+  const hall = record.profession === "farmer" || record.profession === "picker" ? "farm"
+    : record.profession === "woodcutter" || record.profession === "forester" ? "lumberCamp"
+    : null;
+  if (!hall) return 1;
+  const raised = (state.buildings ?? []).find((b) => b.buildingId === hall);
+  return 1 + 0.1 * (raised?.level ?? 0);
 }
 
 function suggestedFor(record) {

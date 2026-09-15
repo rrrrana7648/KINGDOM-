@@ -67,12 +67,20 @@ export function recordForEntity(state, entity) {
   return undefined;
 }
 
+const STAGE_ICON = { baby: "🍼", toddler: "🧸", child: "🧒" };
+
 /** Rebuilds the overhead name with level, profession and any phase icon. */
 export function refreshNameTag(record, entity, phaseIcon = "") {
   if (!entity) return;
-  let pretty = record.profession[0].toUpperCase() + record.profession.slice(1);
+  let pretty = record.profession
+    ? record.profession[0].toUpperCase() + record.profession.slice(1)
+    : "Settler";
   if (record.profession === "buyer" && record.buyerCommodity) {
     pretty = `${COMMODITIES[record.buyerCommodity].label} Buyer`;
+  }
+  if (record.ageStage && record.ageStage !== "adult") {
+    const stage = record.ageStage[0].toUpperCase() + record.ageStage.slice(1);
+    pretty = `${STAGE_ICON[record.ageStage] ?? ""} ${stage}`.trim();
   }
   const role = record.role === "minister" ? "§eMinister" : `§7${pretty} L${record.level}`;
   const prefix = phaseIcon ? `${phaseIcon} ` : "";

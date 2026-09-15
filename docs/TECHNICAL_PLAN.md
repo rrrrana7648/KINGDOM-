@@ -26,16 +26,13 @@ KINGDOM-/
 │  │  ├─ manifest.json
 │  │  ├─ scripts/
 │  │  │  ├─ main.js            # bootstrap: commands, events, tick loops
-│  │  │  ├─ core/
-│  │  │  │  ├─ state.js        # save/load (world dynamic properties)
-│  │  │  │  ├─ names.js        # citizen name pools
-│  │  │  │  ├─ clock.js        # 20-min day ↔ colony clock mapping
-│  │  │  │  ├─ hud.js          # scoreboard sidebar HUD
-│  │  │  │  └─ economist.js    # wage/price formulas + tables (§28/§29)
-│  │  │  └─ game/
-│  │  │     ├─ founding.js     # /kingdom:start setup flow
-│  │  │     ├─ menu.js         # Royal Scepter Kingdom Menu
-│  │  │     └─ citizens.js     # NPC spawn & citizen registry
+│  │  │  ├─ core/              # state, names, clock, hud, economist
+│  │  │  ├─ economy/           # buyers, pricebook, tax, market, finance, mint, bank
+│  │  │  ├─ game/              # founding, menu, citizens, schedule, jobs,
+│  │  │  │                     # movement, npcRegistry, dayroll, decrees
+│  │  │  ├─ build/             # catalog, construction
+│  │  │  ├─ social/            # family, housing
+│  │  │  └─ world/             # harbor, migration
 │  │  ├─ entities/  items/  blocks/  recipes/   # JSON content (later)
 │  │  └─ structures/                            # blueprints (later)
 │  └─ RP_Kingdom/              # Resource Pack (the looks; custom art later)
@@ -68,11 +65,11 @@ KINGDOM-/
 | M1 | `/kingdom:start` founding modal, Minister + 2M/2W settlers, scepter menu, clock HUD, day counter, save/load, economist tables | `main`, `state`, `founding`, `citizens`, `hud`, `clock`, `economist` | ✅ built |
 | **M2 (current)** | follow/life orders, daily schedule state machine, needs & mood, XP/levels + speed, woodcutter/farmer/quarry labor loops, work-site zones, physical chest delivery, day-roll wages, death handling | `game/schedule`, `game/jobs`, `game/movement`, `game/npcRegistry`, `game/dayroll` (+ sim tests) | ✅ built |
 | **M3 (built)** | warehouse chest routing, 7 licensed commodity buyer stalls, clerks, floats, quotas, price bands, A/B/C grades, crown salary vs freelance piece-rate, cart-runner consolidation, audit ledger (sharded saves v3) | `economy/buyers`, `economy/pricebook`, updated `jobs`/`dayroll`/`menu` | ✅ built |
-| M4 | market sim, tax engine, Day Roll GDP/net profit, reports | `economy/dayroll`, `economy/tax`, `economy/market` | ⬜ planned |
-| M5 | paper/ink/mint chain, inflation, bank loans & debt | `economy/mint`, `economy/bank` | ⬜ planned |
-| M6 | decrees + deadlines + managers, blueprint & scepter construction, upgrades | `game/decrees`, `build/construction`, `structures/` | ⬜ planned |
-| M7 | courtship, marriage requests, 6-day child aging, houses registry, schools | `social/family`, `social/housing` | ⬜ planned |
-| M8 | recruitment missions, refugee ships, harbor trade events | `world/harbor`, `world/migration` | ⬜ planned |
+| M4 | market sim, tax engine, Day Roll GDP/net profit, reports | `economy/tax`, `economy/market`, `economy/finance` | ✅ built |
+| M5 | paper/ink/mint chain, inflation, bank loans & debt | `economy/mint`, `economy/bank` | ✅ built |
+| M6 | decrees + deadlines + managers, blueprint & scepter construction, upgrades | `game/decrees`, `build/construction`, `build/catalog` | ✅ built |
+| M7 | courtship, marriage requests, 6-day child aging, houses registry, schools | `social/family`, `social/housing` | ✅ built |
+| M8 | recruitment missions, refugee ships, harbor trade events | `world/harbor`, `world/migration` | ✅ built |
 | M9 | crime, courts, inspectors, guards/army, raids | `security/*` | ⬜ planned |
 | M10 | seasons/weather/disease events, tech tree, railway/telegraph | `events/*`, `tech/tree` | ⬜ planned |
 | M11 | co-op officer roles & permissions | `net/roles` | ⬜ planned |

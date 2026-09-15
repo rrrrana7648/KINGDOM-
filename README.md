@@ -8,11 +8,16 @@ Rule a living Victorian-era colony inside Minecraft **Bedrock** (mobile): you ar
 - 🧩 Language: **JavaScript (Script API 2.1.0)** + JSON — Bedrock cannot run Java/Forge mods
 - 📦 Shipped as one `.mcaddon` (Behavior Pack + Resource Pack)
 
-## ▶️ Play the current build (Milestones M1–M3)
+## ▶️ Play the current build (Milestones M1–M8)
 
 - **M1:** `/kingdom:start` founding flow, Sir Edmund Hale (Minister), 2-men + 2-women founding party, Royal Scepter menu, live action-bar colony clock (vanilla 20-minute day), sidebar HUD, population policy, suggested wages, world-saved state.
 - **M2:** citizens follow the King or live the daily schedule (breakfast · two shifts · lunch · deliveries · dinner · leisure · curfew sleep), need bars and mood, woodcutter/farmer/quarry labor with replanting and XP levels, follow/armed/profession orders, work-site marking, stockpile chest delivery, monster flight, daily wage roll, death handling, relog-safe NPC linking.
 - **M3:** Crown Warehouse economy — hire licensed **commodity buyer clerks** (wood/stone/ore/grain/cash-crop/fish/livestock stalls) each with a linked chest, daily **coin float**, **quota**, adjustable **price band** and A/B/C quality grades; citizens choose **crown salary vs freelance piece-rate**; dawn cart-runner consolidates stall chests into the warehouse, refunds and re-funds floats; full **audit ledger**; save data is sharded for scale.
+- **M4:** market days (citizen spending → GDP services, sales tax, Crown shop profit), seven-lever **tax engine** with presets (Low/Normal/High/Double War Tax/Holiday), live **GDP & net-profit** books, economist nudges, black-market warnings.
+- **M5:** **Royal Mint** physical chain (mill paper, grind ink, engrave plates, print ₹100 batches), money supply, **inflation** and price index, demonetization edict, **State Bank** citizen loans/mortgages and Crown foreign debt with rates.
+- **M6:** royal **decrees with deadlines & budgets** (build, recruit, stockpile, tax edict, custom), manager reports, completion bonuses, missed-deadline strikes; **blueprint construction** with crews, warehouse materials and real raised footprints; building halls buff their trades; scepter town plazas; hands-off ruling budget.
+- **M7:** consent-gated **courtship → marriage requests → engagements → weddings**, child requests with thresholds, 3-day pregnancies, **6-day childhood** (baby → toddler → child → adult with inherited XP), single-adopter orphans, named **house registry** with rents, wills & inheritance.
+- **M8:** **recruiter missions** and **refugee ships** (willing, paid migration gated by food/beds/happiness and population policy), buildable **harbor** with clipper schedules, world-price booms/gluts, exports, imports and duties, auto-grow tithe-days.
 
 1. Run `bash tools/package.sh` (or download a release `.mcaddon`).
 2. Copy `dist/KINGDOM.mcaddon` to your Android phone and open it with Minecraft — both packs import.
@@ -33,4 +38,4 @@ tools/package.sh → dist/KINGDOM.mcaddon
 
 ## 🚧 Status
 
-M1 scaffolded; milestones M2–M12 are defined in the technical plan. No content from the design's boundary list (forced labor/marriage/explicit content) will be implemented.
+M1–M8 built and regression-tested (`tools/sim`); milestones M9–M12 are defined in the technical plan. No content from the design's boundary list (forced labor/marriage/explicit content) will be implemented.

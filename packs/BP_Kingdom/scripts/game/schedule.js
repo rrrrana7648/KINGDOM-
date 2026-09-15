@@ -4,6 +4,9 @@
  * 06:00 breakfast · 07:30 work 1 · 12:00 lunch · 13:00 work 2 ·
  * 17:30 deliveries · 18:00 family/leisure · 21:00 curfew/sleep.
  * Followers ("Stay with me") shadow the King; released citizens "live".
+ * M6: builders posted to a site raise it instead of quarrying.
+ * M7: babies stay home, toddlers follow mother, children school & play;
+ *     adults court in the leisure hours.
  */
 import { world } from "@minecraft/server";
 import { colonyMinutes } from "../core/clock.js";
@@ -11,6 +14,8 @@ import { walkToward, distanceXZ } from "./movement.js";
 import { getEntity, refreshNameTag } from "./npcRegistry.js";
 import { performWork, deliver, resetRuntime } from "./jobs.js";
 import { buyerForCitizen } from "../economy/buyers.js";
+import { performBuild } from "../build/construction.js";
+import { tickCourtship } from "../social/family.js";
 
 const OVERWORLD = () => world.getDimension("overworld");
 const leisureTargets = new Map();
@@ -24,6 +29,8 @@ const PHASE = {
   leisure: { icon: "§d♪" },
   flee: { icon: "§c⚠" },
   follow: { icon: "§7👣" },
+  build: { icon: "§e🏗" },
+  school: { icon: "§b📚" },
 };
 
 export function hourNow() {
@@ -34,7 +41,7 @@ export function hourNow() {
 export function tickCitizens(state, tick) {
   const dim = OVERWORLD();
   for (const record of state.citizens) {
-    if (!record.alive || record.ageStage !== "adult") continue;
+    if (!record.alive) continue;
     const entity = getEntity(record, dim);
     if (!entity) continue;
     record._dim = dim;
@@ -71,6 +78,9 @@ function tickOne(record, entity, state, tick) {
     return;
   }
 
+  // Children live by the nursery clock, not the shift bell.
+  if (record.ageStage !== "adult") return tickChild(record, entity, state, hour, tick);
+
   // Buyer clerks keep their stall counter rather than working sites.
   if (record.profession === "buyer") return tickClerk(record, entity, state, hour, tick);
 
@@ -83,11 +93,105 @@ function tickOne(record, entity, state, tick) {
   else phaseSleep(record, entity, state);
 }
 
+/* ---------------- childhood (M7) ---------------- */
+
+function tickChild(record, entity, state, hour, tick) {
+  decayNeeds(record, 0.02);
+  const home = homeAnchor(record, state);
+
+  // Three nursery meals at home.
+  let meal = null;
+  if (hour >= 6 && hour < 7.5) meal = "breakfast";
+  else if (hour >= 12 && hour < 13) meal = "lunch";
+  else if (hour >= 18.5 && hour < 19.5) meal = "dinner";
+  if (meal && home && distanceXZ(entity.location, home) < 6) childMeal(record, state, meal);
+
+  if (hour >= 21 || hour < 6) {
+    if (home) {
+      if (distanceXZ(entity.location, home) > 2.4) {
+        walkToward(entity, home, { arrive: 2.0, speed: 0.8 });
+      } else {
+        record.day.slept = true;
+        record.needs.rest = Math.min(100, record.needs.rest + 0.8);
+      }
+    }
+    refreshNameTag(record, entity, PHASE.sleep.icon);
+    return;
+  }
+
+  if (record.ageStage === "baby") {
+    // Crib days: rest at home.
+    if (home && distanceXZ(entity.location, home) > 2.5) {
+      walkToward(entity, home, { arrive: 2.0, speed: 0.6 });
+    }
+    record.needs.rest = Math.min(100, record.needs.rest + 0.2);
+    refreshNameTag(record, entity, "§f🍼");
+    return;
+  }
+
+  if (record.ageStage === "toddler") {
+    // First steps: shadow mother when she is near, else stay home.
+    const mother = state.citizens.find((c) => c.id === record.motherId && c.alive);
+    const mEntity = mother?._entity;
+    if (mEntity && distanceXZ(entity.location, mEntity.location) < 40) {
+      walkToward(entity, mEntity.location, { arrive: 2.0, speed: 0.7 });
+    } else if (home && distanceXZ(entity.location, home) > 3) {
+      walkToward(entity, home, { arrive: 2.4, speed: 0.7 });
+    }
+    record.needs.leisure = Math.min(100, record.needs.leisure + 0.2);
+    refreshNameTag(record, entity, "§f🧸");
+    return;
+  }
+
+  // Child: school mornings (when a schoolhouse stands), play afternoons.
+  const schooled = (state.buildings ?? []).some((b) => b.buildingId === "school");
+  if (schooled && hour >= 7.5 && hour < 12) {
+    const a = anchor(state);
+    if (a) {
+      if (distanceXZ(entity.location, a) > 3) {
+        walkToward(entity, a, { arrive: 2.4, speed: 0.7 });
+      } else if (tick % 40 === 0) {
+        record.xp += 1; // literacy compounds into adulthood
+      }
+    }
+    refreshNameTag(record, entity, PHASE.school.icon);
+    return;
+  }
+  // Play: wander near home like leisure.
+  phaseLeisure(record, entity, state, tick);
+}
+
+function homeAnchor(record, state) {
+  const house = (state.houses ?? []).find((h) => h.id === record.home);
+  if (house) return { x: house.loc.x + 0.5, y: house.loc.y, z: house.loc.z + 0.5 };
+  return anchor(state);
+}
+
+function childMeal(record, state, mealKey) {
+  if (record.day[mealKey]) return;
+  record.day[mealKey] = true;
+  if (state.foodStock >= 1) {
+    state.foodStock--;
+    record.day.meals++;
+    state.dailyStats.mealsEaten++;
+    record.needs.food = Math.min(100, record.needs.food + 34);
+  } else {
+    state.dailyStats.mealsMissed++;
+    record.needs.food = Math.max(0, record.needs.food - 10);
+  }
+}
+
 /* ---------------- phases ---------------- */
 
 function phaseWork(record, entity, state, tick) {
   decayNeeds(record, 0.03);
   record.needs.food -= 0.02;
+  // M6: posted builders raise the scaffold instead of quarrying.
+  if (record.assignedSite) {
+    const res = performBuild(record, state, tick);
+    refreshNameTag(record, entity, res.status === "building" ? PHASE.build.icon : PHASE.work.icon);
+    return;
+  }
   const res = performWork(record, state, tick);
   if (res.status === "delivering") refreshNameTag(record, entity, PHASE.deliver.icon);
   else if (res.reason === "nozone") {
@@ -140,6 +244,12 @@ function phaseLeisure(record, entity, state, tick) {
   }
   walkToward(entity, dest, { arrive: 1.0, speed: 0.5 });
   record.day.leisureTicks++;
+  // M7: unpartnered adults court in the evening hours.
+  if (record.ageStage === "adult") {
+    try {
+      tickCourtship(record, entity, state);
+    } catch { /* romance never breaks the sim */ }
+  }
   refreshNameTag(record, entity, PHASE.leisure.icon);
 }
 
@@ -288,7 +398,7 @@ function nearestPlayer(entity, maxDist) {
   return best;
 }
 
-/** Broadcast orders (Kingdom Menu → Orders). */
+/** Broadcast orders (Kingdom Menu → Orders). Adults only; children stay home. */
 export function setModeAll(state, mode, filter) {
   let n = 0;
   for (const c of state.citizens) {
