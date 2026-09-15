@@ -1,0 +1,11 @@
+{
+  "resource_pack_name": "KINGDOM",
+  "texture_name": "atlas.items",
+  "texture_data": {
+    "kingdom_scepter": { "textures": "textures/items/kingdom_scepter" },
+    "kingdom_gavel": { "textures": "textures/items/kingdom_gavel" },
+    "kingdom_guard_badge": { "textures": "textures/items/kingdom_guard_badge" },
+    "kingdom_royal_seal": { "textures": "textures/items/kingdom_royal_seal" },
+    "kingdom_research_scroll": { "textures": "textures/items/kingdom_research_scroll" }
+  }
+}

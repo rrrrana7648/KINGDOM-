@@ -1,2 +1,8 @@
 pack.name=KINGDOM Resource Pack
 pack.description=Custom art for the KINGDOM add-on (art pass M12).
+
+item.kingdom:scepter.name=§6§lRoyal Scepter
+item.kingdom:gavel.name=§eMagistrate's Gavel
+item.kingdom:guard_badge.name=§6Guard Badge
+item.kingdom:royal_seal.name=§cRoyal Seal
+item.kingdom:research_scroll.name=§bResearch Scroll

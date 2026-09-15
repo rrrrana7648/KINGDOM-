@@ -13,6 +13,8 @@ import { getEntity, refreshNameTag } from "./npcRegistry.js";
 import { SKILL_MULT } from "../core/economist.js";
 import { sellLoad, buyerForCommodity } from "../economy/buyers.js";
 import { categoryOf } from "../economy/pricebook.js";
+import { techHaste } from "../tech/tree.js";
+import { farmYield, stormBound } from "../events/seasons.js";
 
 const ZONE_FOR_JOB = {
   woodcutter: "forest",
@@ -96,6 +98,19 @@ export function performWork(record, state, tick) {
   if (!entity) return { ok: false, reason: "unloaded" };
   record._entity = entity;
 
+  // M9–M10 service professions keep no work site: guards patrol the town
+  // anchor, doctors/teachers/inspectors serve indoors (abstract shifts).
+  if (record.profession === "guard" || record.profession === "soldier") {
+    return patrolDuty(record, state, tick, entity);
+  }
+  if (["doctor", "teacher", "inspector"].includes(record.profession)) {
+    record.day.workedTicks += 5;
+    return { ok: true, status: "on-duty" };
+  }
+
+  // ⛈️ Storms shelter every outdoor crew (the watch excepted, above).
+  if (stormBound(state)) return { ok: true, status: "sheltered" };
+
   const zoneKey = ZONE_FOR_JOB[record.profession];
   const zone = zoneKey ? state.zones[zoneKey] : null;
   if (!zone) return { ok: false, reason: "nozone" };
@@ -142,7 +157,7 @@ export function performWork(record, state, tick) {
   }
   face(entity, t);
   mem.workCalls++;
-  const speed = SKILL_MULT[record.level] ?? 1;
+  const speed = (SKILL_MULT[record.level] ?? 1) * buildingHaste(record, state) * techHaste(state, record.profession);
   const requiredCalls = Math.max(1, Math.round((t.calls ?? 4) / speed));
 
   if (mem.workCalls % 2 === 0) {
@@ -150,8 +165,8 @@ export function performWork(record, state, tick) {
   }
   if (mem.workCalls < requiredCalls) return { ok: true, status: "working" };
 
-  // Complete the job.
-  const products = harvest(block, t, dim);
+  // Complete the job (fields answer the sky — see farmYield).
+  const products = harvest(block, t, dim, state);
   for (const [item, qty] of products) {
     mem.carry[item] = (mem.carry[item] ?? 0) + qty;
   }
@@ -200,6 +215,31 @@ export function deliver(record, state, memArg) {
 
 /* -------------------------------------------------------------- */
 
+/**
+ * M9 patrol duty: guards walk a lantern circuit of the town anchor by day
+ * and stand the night watch after curfew; the honest rhythm of boots keeps
+ * constable power real. Slow drill XP accrues on the rounds.
+ */
+function patrolDuty(record, state, tick, entity) {
+  const a = state.zones.home ?? state.zones.town;
+  if (!a) return { ok: false, reason: "nozone" };
+  const mem = rt(record.id);
+  const lanterns = [
+    { x: a.x + 6, y: a.y, z: a.z },
+    { x: a.x, y: a.y, z: a.z + 6 },
+    { x: a.x - 6, y: a.y, z: a.z },
+    { x: a.x, y: a.y, z: a.z - 6 },
+  ];
+  mem.lantern = mem.lantern ?? 0;
+  const post = lanterns[mem.lantern % lanterns.length];
+  const walk = walkToward(entity, post, { arrive: 1.6, speed: 0.7 });
+  if (walk === "arrived") mem.lantern++;
+  record.day.workedTicks += 5;
+  mem.workCalls = (mem.workCalls ?? 0) + 1;
+  if (mem.workCalls % 40 === 0) grantXp(record, entity, 4); // drill compounds
+  return { ok: true, status: "patrolling" };
+}
+
 function grantXp(record, entity, amount) {
   if (amount <= 0) return;
   record.xp += amount;
@@ -220,9 +260,19 @@ function grantXp(record, entity, amount) {
   }
 }
 
+/** M6 halls of industry: farmsteads & lumber camps speed crews +10%/level. */
+function buildingHaste(record, state) {
+  const hall = record.profession === "farmer" || record.profession === "picker" ? "farm"
+    : record.profession === "woodcutter" || record.profession === "forester" ? "lumberCamp"
+    : null;
+  if (!hall) return 1;
+  const raised = (state.buildings ?? []).find((b) => b.buildingId === hall);
+  return 1 + 0.1 * (raised?.level ?? 0);
+}
+
 function suggestedFor(record) {
   // Lazy import avoided; mirror the simple formula for M2 jobs.
-  const base = { woodcutter: 6, forester: 6, farmer: 6, picker: 6, builder: 9, laborer: 5, hauler: 5 }[record.profession] ?? 6;
+  const base = { woodcutter: 6, forester: 6, farmer: 6, picker: 6, builder: 9, laborer: 5, hauler: 5, guard: 12, soldier: 12, inspector: 18, doctor: 10, teacher: 7 }[record.profession] ?? 6;
   return Math.round(base * (SKILL_MULT[record.level] ?? 1) * 100) / 100;
 }
 
@@ -344,9 +394,10 @@ function standSpot(target, dim, from) {
   return best;
 }
 
-function harvest(block, target, dim) {
+function harvest(block, target, dim, state) {
   const type = block.typeId;
   const products = [];
+  const field = CROPS[type] ? farmYield(state) : 1; // monsoon, drought, frost, canals
 
   if (LOGS.has(type)) {
     products.push([type, 1]);
@@ -363,7 +414,10 @@ function harvest(block, target, dim) {
       }
     }
   } else if (CROPS[type]) {
-    for (const [item, qty] of CROPS[type].drops) products.push([item, qty]);
+    for (const [item, qty] of CROPS[type].drops) {
+      const scaled = Math.max(0, Math.round(qty * field));
+      if (scaled > 0) products.push([item, scaled]);
+    }
     try {
       block.setPermutation(BlockPermutation.resolve(type, { growth: 0 }));
     } catch {

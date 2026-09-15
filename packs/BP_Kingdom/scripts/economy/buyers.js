@@ -103,7 +103,10 @@ export function sellLoad(record, state, dim, load) {
       destination = "stall";
       const rate = unitPrice(item, grade, stall.band);
       if (isFreelance) {
-        const quotaRoom = Math.max(0, stall.quota - stall.soldUnits);
+        // M6 warehouses deepen every stall: +64 quota headroom per level.
+        const warehouse = (state.buildings ?? []).find((b) => b.buildingId === "warehouse");
+        const quota = stall.quota + 64 * (warehouse?.level ?? 0);
+        const quotaRoom = Math.max(0, quota - stall.soldUnits);
         const floatRoom = rate > 0 ? Math.floor((stall.float + 1e-9) / rate) : 0;
         take = Math.max(0, Math.min(qty, quotaRoom, floatRoom));
         price = Math.round(take * rate * 100) / 100;
@@ -160,6 +163,8 @@ export function sellLoad(record, state, dim, load) {
 
     if (price > 0) {
       record.savings = Math.round(((record.savings ?? 0) + price) * 100) / 100;
+      record.day = record.day ?? { delivered: 0 };
+      record.day.earned = Math.round(((record.day.earned ?? 0) + price) * 100) / 100;
       if (!stall) state.treasury = Math.round((state.treasury - price) * 100) / 100;
       state.dailyStats.freelancePaid =
         Math.round(((state.dailyStats.freelancePaid ?? 0) + price) * 100) / 100;

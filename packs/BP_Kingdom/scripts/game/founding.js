@@ -129,10 +129,16 @@ export function ensureScepter(player) {
   if (!container) return;
   for (let i = 0; i < container.size; i++) {
     const item = container.getItem(i);
-    if (item?.nameTag?.includes(SCEPTER_NAME)) return;
+    if (item?.typeId === "kingdom:scepter" || item?.nameTag?.includes(SCEPTER_NAME)) return;
   }
-  const scepter = new ItemStack("minecraft:stick", 1);
-  scepter.nameTag = "§6§lRoyal Scepter";
+  // M12: the true Scepter; heirloom sticks from older saves still open menus.
+  let scepter;
+  try {
+    scepter = new ItemStack("kingdom:scepter", 1);
+  } catch {
+    scepter = new ItemStack("minecraft:stick", 1);
+    scepter.nameTag = "§6§lRoyal Scepter";
+  }
   scepter.setLore([
     "§7Use (long-press) to open the",
     "§7Kingdom Menu.",

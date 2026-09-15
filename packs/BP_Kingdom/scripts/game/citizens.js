@@ -2,6 +2,7 @@
  * citizens.js — spawns named NPCs and keeps the citizen registry in state.
  * M1/M2 use vanilla villagers (minecraft:villager_v2) with name tags and a
  * persistent kingdom:cid_ tag; custom Victorian models arrive at M12.
+ * M7 adds newborns (6-day aging to adulthood); M8 adds willing migrants.
  */
 import { makeName, MINISTER_NAME, MALE_FIRST, FEMALE_FIRST, SURNAMES } from "../core/names.js";
 import { suggestWage } from "../core/economist.js";
@@ -52,13 +53,26 @@ function freshRecord(state, entity, { name, sex, role, profession }) {
     savings: 0,
     home: null,
     spouse: null,
+    partner: null, // betrothed during engagement (M7)
+    affection: {}, // courtship meters by citizen id (M7)
+    pregnancy: null, // {day,fatherId,motherId} (M7)
+    motherId: null,
+    fatherId: null,
+    rentOwed: 0,
+    assignedSite: null, // construction crew posting (M6)
     mood: role === "minister" ? 90 : 78,
     health: 20,
     status: "following",
+    honesty: 40 + Math.floor(Math.random() * 56), // M9: 40–95
+    strikes: 0, // M9: prior convictions
+    fugitive: false, // M9: fled justice
+    sick: 0, // M10: fever days remaining
+    quarantined: false, // M10: individual isolation
     needs: { food: 100, rest: 100, leisure: 100, safety: 100 },
     day: {
       meals: 0, slept: false, workedTicks: 0, leisureTicks: 0,
       delivered: 0, scared: 0, breakfast: false, lunch: false, dinner: false,
+      earned: 0,
     },
   };
   record.cidTag = tagForRecord(record);
@@ -69,6 +83,15 @@ function outfit(entity, record) {
   entity.addTag("kingdom:npc");
   entity.addTag(record.cidTag);
   refreshNameTag(record, entity);
+}
+
+function uniqueName(state, sex) {
+  const used = new Set(state.citizens.map((c) => c.fullName));
+  let name = makeName(sex);
+  let guard = 0;
+  while (used.has(name) && guard++ < 30) name = makeName(sex);
+  used.add(name);
+  return name;
 }
 
 /** @returns {object} the Minister's citizen record */
@@ -152,6 +175,75 @@ export function spawnBuyer(player, state, commodity, chestBlock) {
 
   const buyer = createBuyer(state, record.id, name, commodity, chestBlock.location);
   return { record, buyer, entity };
+}
+
+/**
+ * A newborn arrives (M7): spawns beside the mother, inherits the family
+ * surname, and begins the 6-day dependency (baby→toddler→child→adult).
+ * Adoptees arrive as toddlers via opts {stage, ageDays}.
+ * @returns {object|null} the baby record
+ */
+export function spawnChild(state, dim, mother, father = null, opts = {}) {
+  const anchor = state.zones.home ?? state.zones.town ?? { x: 0.5, y: 64, z: 0.5 };
+  const loc = mother._entity?.location ?? anchor;
+  const entity = safeSpawn(dim, { x: loc.x + 1, y: loc.y, z: loc.z });
+  if (!entity) return null;
+
+  const sex = Math.random() < 0.5 ? "m" : "f";
+  const pool = sex === "m" ? MALE_FIRST : FEMALE_FIRST;
+  const surname = (mother.fullName.split(" ")[1] ?? father?.fullName.split(" ")[1] ?? SURNAMES[0]);
+  const used = new Set(state.citizens.map((c) => c.fullName));
+  let name = `${pool[Math.floor(Math.random() * pool.length)]} ${surname}`;
+  let guard = 0;
+  while (used.has(name) && guard++ < 30) {
+    name = `${pool[Math.floor(Math.random() * pool.length)]} ${surname}`;
+  }
+
+  const record = freshRecord(state, entity, {
+    name, sex, role: "settler", profession: "child",
+  });
+  record.ageStage = opts.stage ?? "baby";
+  record.ageDays = opts.ageDays ?? 0;
+  record.motherId = mother.id;
+  record.fatherId = father?.id ?? mother.spouse ?? null;
+  record.mode = "living";
+  record.status = "home";
+  record.wage = 0;
+  record.mood = 85;
+  if (mother.home) record.home = mother.home;
+  outfit(entity, record);
+  state.citizens.push(record);
+  return record;
+}
+
+/**
+ * A willing migrant answers the recruiter's call or leaves the refugee ship
+ * (M8): spawns at the town anchor, gathers with the King's retinue until
+ * released to live and work.
+ * @returns {object|null} the migrant record
+ */
+export function spawnMigrant(state, dim, profession = "laborer") {
+  const anchor = state.zones.town ?? { x: 0.5, y: 64, z: 0.5 };
+  const scatter = () => (Math.random() - 0.5) * 4;
+  const entity = safeSpawn(dim, {
+    x: anchor.x + scatter(),
+    y: anchor.y,
+    z: anchor.z + scatter(),
+  });
+  if (!entity) return null;
+
+  const sex = Math.random() < 0.5 ? "m" : "f";
+  const record = freshRecord(state, entity, {
+    name: uniqueName(state, sex),
+    sex,
+    role: "settler",
+    profession,
+  });
+  record.mode = "following"; // musters with the retinue; the King releases them
+  record.status = "following";
+  outfit(entity, record);
+  state.citizens.push(record);
+  return record;
 }
 
 function safeSpawn(dimension, location) {

@@ -37,6 +37,7 @@ export const BASE_WAGE = {
   teacher: 10,
   tailor: 10,
   buyer: 12,
+  guard: 12,
   soldier: 14,
   blacksmith: 15,
   deepMiner: 18, // deepslate gold/redstone/lapis
@@ -124,4 +125,23 @@ export function suggestPieceRate(itemTypeId, grade = "C", quantity = 1) {
   const base = CROWN_BUY_PRICE[itemTypeId] ?? 0.1;
   const gradeMult = grade === "A" ? 1.25 : grade === "B" ? 1.1 : 1.0;
   return Math.round(base * gradeMult * quantity * 100) / 100;
+}
+
+/** Citizen retail ≈ 2× Crown buy; harbor export ≈ 1.5–3× (design §29). */
+export const RETAIL_MULT = 2;
+export const EXPORT_RANGE = [1.5, 3.0];
+
+/**
+ * Living wage: 3 market meals + a tenement bed + sundries, at the ruling
+ * price index. Shown beside the minimum-wage edict (design §37.26).
+ */
+export function livingWage(state) {
+  const idx = state.market?.priceIndex ?? state.inflation?.priceIndex ?? 1;
+  return Math.round((3 * 2 * idx + 1 + 1) * 100) / 100;
+}
+
+/** Wage demand drifts with inflation: every +10% prices ≈ +8% demands. */
+export function inflationWageFactor(state) {
+  const idx = state.inflation?.priceIndex ?? 1;
+  return Math.round((1 + (idx - 1) * 0.8) * 1000) / 1000;
 }
