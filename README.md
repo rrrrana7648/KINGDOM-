@@ -8,10 +8,11 @@ Rule a living Victorian-era colony inside Minecraft **Bedrock** (mobile): you ar
 - 🧩 Language: **JavaScript (Script API 2.1.0)** + JSON — Bedrock cannot run Java/Forge mods
 - 📦 Shipped as one `.mcaddon` (Behavior Pack + Resource Pack)
 
-## ▶️ Play the current build (Milestones M1–M2)
+## ▶️ Play the current build (Milestones M1–M3)
 
 - **M1:** `/kingdom:start` founding flow, Sir Edmund Hale (Minister), 2-men + 2-women founding party, Royal Scepter menu, live action-bar colony clock (vanilla 20-minute day), sidebar HUD, population policy, suggested wages, world-saved state.
 - **M2:** citizens follow the King or live the daily schedule (breakfast · two shifts · lunch · deliveries · dinner · leisure · curfew sleep), need bars and mood, woodcutter/farmer/quarry labor with replanting and XP levels, follow/armed/profession orders, work-site marking, stockpile chest delivery, monster flight, daily wage roll, death handling, relog-safe NPC linking.
+- **M3:** Crown Warehouse economy — hire licensed **commodity buyer clerks** (wood/stone/ore/grain/cash-crop/fish/livestock stalls) each with a linked chest, daily **coin float**, **quota**, adjustable **price band** and A/B/C quality grades; citizens choose **crown salary vs freelance piece-rate**; dawn cart-runner consolidates stall chests into the warehouse, refunds and re-funds floats; full **audit ledger**; save data is sharded for scale.
 
 1. Run `bash tools/package.sh` (or download a release `.mcaddon`).
 2. Copy `dist/KINGDOM.mcaddon` to your Android phone and open it with Minecraft — both packs import.

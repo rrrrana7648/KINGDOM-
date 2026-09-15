@@ -3,9 +3,11 @@
  * M1/M2 use vanilla villagers (minecraft:villager_v2) with name tags and a
  * persistent kingdom:cid_ tag; custom Victorian models arrive at M12.
  */
-import { makeName, MINISTER_NAME } from "../core/names.js";
+import { makeName, MINISTER_NAME, MALE_FIRST, FEMALE_FIRST, SURNAMES } from "../core/names.js";
 import { suggestWage } from "../core/economist.js";
 import { tagForRecord, refreshNameTag } from "./npcRegistry.js";
+import { createBuyer } from "../economy/buyers.js";
+import { COMMODITIES } from "../economy/pricebook.js";
 
 export const NPC_TYPE = "minecraft:villager_v2";
 
@@ -111,6 +113,45 @@ export function spawnFoundingParty(player, state) {
     records.push(record);
   });
   return records;
+}
+
+/**
+ * Hires a licensed commodity buyer: spawns a clerk beside the stall chest
+ * and links both the citizen record and the stall record.
+ * @returns {{record:object,buyer:object}}
+ */
+export function spawnBuyer(player, state, commodity, chestBlock) {
+  const dim = player.dimension;
+  const { x, y, z } = chestBlock.location;
+  let entity = safeSpawn(dim, { x: x + 1.5, y, z: z + 0.5 });
+  if (!entity) entity = safeSpawn(dim, spawnSpot(player, 0, 1, 2));
+
+  const used = new Set(state.citizens.map((c) => c.fullName));
+  const sex = Math.random() < 0.5 ? "m" : "f";
+  const pool = sex === "m" ? MALE_FIRST : FEMALE_FIRST;
+  let name = `${pool[Math.floor(Math.random() * pool.length)]} ${
+    SURNAMES[Math.floor(Math.random() * SURNAMES.length)]
+  }`;
+  let guard = 0;
+  while (used.has(name) && guard++ < 30) {
+    name = `${pool[Math.floor(Math.random() * pool.length)]} ${
+      SURNAMES[Math.floor(Math.random() * SURNAMES.length)]
+    }`;
+  }
+
+  const record = freshRecord(state, entity, {
+    name, sex, role: "settler", profession: "buyer",
+  });
+  record.buyerCommodity = commodity;
+  record.wageMode = "crown";
+  record.mode = "living";
+  record.status = "working";
+  record.wage = suggestWage("buyer", { level: 1 }).wage;
+  outfit(entity, record);
+  state.citizens.push(record);
+
+  const buyer = createBuyer(state, record.id, name, commodity, chestBlock.location);
+  return { record, buyer, entity };
 }
 
 function safeSpawn(dimension, location) {

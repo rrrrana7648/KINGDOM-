@@ -1,11 +1,19 @@
 /**
- * state.js — single source of truth, persisted in a world dynamic property.
- * Save v2 (M2): work-site zones, stockpile, food, needs, citizen mode/orders.
+ * state.js — single source of truth, persisted across SHARDED world dynamic
+ * properties (each has a size cap, so large domains live in their own key):
+ *   kingdom:base      — kingdom settings, zones, buyers, stockpile, stats
+ *   kingdom:citizens  — the citizen registry
+ *   kingdom:ledger    — the audit ledger (capped ring)
+ * Legacy single-key saves (v1/v2) are auto-migrated, then split.
  */
 import { world } from "@minecraft/server";
 
-const SAVE_KEY = "kingdom:save_v1";
-export const SAVE_VERSION = 2;
+const LEGACY_KEY = "kingdom:save_v1";
+const K_BASE = "kingdom:base";
+const K_CITIZENS = "kingdom:citizens";
+const K_LEDGER = "kingdom:ledger";
+export const SAVE_VERSION = 3;
+export const LEDGER_CAP = 150;
 
 /** @returns {object} a fresh kingdom document */
 export function defaultState() {
@@ -19,24 +27,29 @@ export function defaultState() {
     colony: { name: "", bannerColor: "Crimson", difficulty: "Standard" },
     treasury: 1000,
     moneySupply: 1000,
-    foodStock: 200, // rations consumed at meals; farmer deliveries refill this
+    foodStock: 200,
     populationPolicy: { mode: "unlimited", cap: 40, growPer10Days: 2 },
     timePresetMinutes: 20,
     citizens: [],
     decrees: [],
     nextCitizenId: 1,
+    nextBuyerId: 1,
     zones: {
-      // {x,y,z} anchors; work sites add radius r
-      town: null,
-      forest: null,
-      farm: null,
-      quarry: null,
-      home: null,
-      stockpileChest: null, // {x,y,z} looked-at chest
+      town: null, forest: null, farm: null, quarry: null, home: null,
+      stockpileChest: null,
     },
-    stockpile: {}, // material itemId -> virtual count (also physically in chest)
-    dayProduction: {}, // itemId -> amount produced since last Day Roll
-    dailyStats: { wagesPaid: 0, mealsEaten: 0, mealsMissed: 0 },
+    stockpile: {},
+    dayProduction: {},
+    dailyStats: freshStats(),
+    buyers: [], // licensed commodity buyer stalls (see economy/buyers.js)
+    ledger: [],
+  };
+}
+
+export function freshStats() {
+  return {
+    wagesPaid: 0, mealsEaten: 0, mealsMissed: 0,
+    freelancePaid: 0, floatsFunded: 0,
   };
 }
 
@@ -45,8 +58,16 @@ let cache = null;
 export function getState() {
   if (cache) return cache;
   try {
-    const raw = world.getDynamicProperty(SAVE_KEY);
-    cache = raw ? migrate(JSON.parse(raw)) : defaultState();
+    const baseRaw = world.getDynamicProperty(K_BASE);
+    if (baseRaw) {
+      const base = JSON.parse(baseRaw);
+      base.citizens = JSON.parse(world.getDynamicProperty(K_CITIZENS) ?? "[]");
+      base.ledger = JSON.parse(world.getDynamicProperty(K_LEDGER) ?? "[]");
+      cache = migrate(base);
+    } else {
+      const legacy = world.getDynamicProperty(LEGACY_KEY);
+      cache = legacy ? migrate(JSON.parse(legacy)) : defaultState();
+    }
   } catch (err) {
     console.warn("[KINGDOM] save read failed, starting fresh: " + err);
     cache = defaultState();
@@ -54,16 +75,28 @@ export function getState() {
   return cache;
 }
 
+/** Persists the live state object across the sharded keys. */
 export function saveState() {
   if (!cache) return;
-  try {
-    // Strip transient runtime references (underscore-prefixed, e.g. _entity).
-    const json = JSON.stringify(cache, (key, value) =>
+  const clean = JSON.parse(
+    JSON.stringify(cache, (key, value) =>
       key.startsWith("_") ? undefined : value
+    )
+  );
+  const { citizens, ledger, ...base } = clean;
+  try {
+    world.setDynamicProperty(K_BASE, JSON.stringify(base));
+    world.setDynamicProperty(K_CITIZENS, JSON.stringify(citizens ?? []));
+    world.setDynamicProperty(
+      K_LEDGER,
+      JSON.stringify((ledger ?? []).slice(-LEDGER_CAP))
     );
-    world.setDynamicProperty(SAVE_KEY, json);
+    // Legacy single-key save is superseded once shards exist.
+    if (world.getDynamicProperty(LEGACY_KEY) !== undefined) {
+      world.setDynamicProperty(LEGACY_KEY, undefined);
+    }
   } catch (err) {
-    console.error("[KINGDOM] save write failed (too large?): " + err);
+    console.error("[KINGDOM] save write failed: " + err);
   }
 }
 
@@ -77,17 +110,36 @@ function migrate(data) {
     };
     data.stockpile = data.stockpile ?? {};
     data.dayProduction = data.dayProduction ?? {};
-    data.dailyStats = data.dailyStats ?? { wagesPaid: 0, mealsEaten: 0, mealsMissed: 0 };
+    data.dailyStats = freshStats();
     for (const c of data.citizens ?? []) {
       c.alive = c.alive ?? true;
-      c.mode = c.mode ?? "following"; // following | living
+      c.mode = c.mode ?? "following";
       c.armed = c.armed ?? false;
       c.savings = c.savings ?? 0;
+      c.wageMode = c.wageMode ?? "crown";
       c.needs = c.needs ?? { food: 100, rest: 100, leisure: 100, safety: 100 };
-      c.day = c.day ?? { meals: 0, slept: false, workedTicks: 0, leisureTicks: 0, delivered: 0, scared: 0, breakfast: false, lunch: false, dinner: false };
+      c.day = c.day ?? {
+        meals: 0, slept: false, workedTicks: 0, leisureTicks: 0,
+        delivered: 0, scared: 0, breakfast: false, lunch: false, dinner: false,
+      };
       c.cidTag = c.cidTag ?? `kingdom:cid_c${String(c.id).replace(/\D/g, "")}`;
     }
     data.version = 2;
+  }
+  if (data.version < 3) {
+    data.buyers = data.buyers ?? [];
+    data.ledger = data.ledger ?? [];
+    data.nextBuyerId = data.nextBuyerId ?? 1;
+    const s = data.dailyStats ?? {};
+    data.dailyStats = {
+      wagesPaid: s.wagesPaid ?? 0,
+      mealsEaten: s.mealsEaten ?? 0,
+      mealsMissed: s.mealsMissed ?? 0,
+      freelancePaid: 0,
+      floatsFunded: 0,
+    };
+    for (const c of data.citizens ?? []) c.wageMode = c.wageMode ?? "crown";
+    data.version = 3;
   }
   return data;
 }

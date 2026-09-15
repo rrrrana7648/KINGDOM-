@@ -4,6 +4,7 @@
  * carries a persistent tag "kingdom:cid_c<id>" and we re-map on load.
  */
 import { world } from "@minecraft/server";
+import { COMMODITIES } from "../economy/pricebook.js";
 
 const cache = new Map(); // citizen record id -> Entity
 
@@ -69,8 +70,10 @@ export function recordForEntity(state, entity) {
 /** Rebuilds the overhead name with level, profession and any phase icon. */
 export function refreshNameTag(record, entity, phaseIcon = "") {
   if (!entity) return;
-  const pretty =
-    record.profession[0].toUpperCase() + record.profession.slice(1);
+  let pretty = record.profession[0].toUpperCase() + record.profession.slice(1);
+  if (record.profession === "buyer" && record.buyerCommodity) {
+    pretty = `${COMMODITIES[record.buyerCommodity].label} Buyer`;
+  }
   const role = record.role === "minister" ? "§eMinister" : `§7${pretty} L${record.level}`;
   const prefix = phaseIcon ? `${phaseIcon} ` : "";
   const color = record.role === "minister" ? "§6§l" : "§f";

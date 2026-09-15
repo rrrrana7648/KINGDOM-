@@ -2,21 +2,55 @@
 
 const AIR = "minecraft:air";
 
+class Container {
+  constructor(size = 27) { this.size = size; this.slots = new Array(size).fill(undefined); }
+  addItem(stack) {
+    let amount = stack.amount;
+    // merge existing stacks first
+    for (let i = 0; i < this.size && amount > 0; i++) {
+      const s = this.slots[i];
+      if (s && s.typeId === stack.typeId && s.amount < 64) {
+        const take = Math.min(amount, 64 - s.amount);
+        s.amount += take; amount -= take;
+      }
+    }
+    for (let i = 0; i < this.size && amount > 0; i++) {
+      if (!this.slots[i]) {
+        const take = Math.min(64, amount);
+        this.slots[i] = new ItemStack(stack.typeId, take);
+        amount -= take;
+      }
+    }
+    return amount > 0 ? new ItemStack(stack.typeId, amount) : undefined;
+  }
+  getItem(i) { return this.slots[i] ? new ItemStack(this.slots[i].typeId, this.slots[i].amount) : undefined; }
+  setItem(i, stack) { this.slots[i] = stack ? new ItemStack(stack.typeId, stack.amount) : undefined; }
+  clearItem(i) { this.slots[i] = undefined; }
+  count(item) {
+    return this.slots.reduce((n, s) => n + (s && (!item || s.typeId === item) ? s.amount : 0), 0);
+  }
+}
+
 class Block {
   constructor(dim, x, y, z, typeId = AIR, states = {}) {
     this.dim = dim; this.location = { x, y, z };
     this.typeId = typeId; this._states = { ...states };
     this.permutation = { getState: (k) => this._states[k] };
     this.isValid = true;
+    this._container = typeId.includes("chest") ? new Container() : undefined;
     this._componentOverride = undefined;
   }
   get isAir() { return this.typeId === AIR; }
   get isLiquid() { return this.typeId.includes("water") || this.typeId.includes("lava"); }
-  setType(id) { this.typeId = id; this._states = {}; this._componentOverride = undefined; }
+  setType(id) {
+    this.typeId = id; this._states = {}; this._componentOverride = undefined;
+    this._container = id.includes("chest") ? new Container() : undefined;
+  }
   setPermutation(p) { this.typeId = p._typeId; this._states = { ...(p.states ?? {}) }; }
   getComponent(id) {
-    if (this._componentOverride && id === "inventory") return this._componentOverride;
-    return undefined;
+    if (id !== "inventory") return undefined;
+    if (this._componentOverride) return this._componentOverride;
+    return this._container ? { container: this._container } : undefined;
   }
   setInventory(container) { this._componentOverride = { container }; }
 }
@@ -103,7 +137,10 @@ const world = {
   getDimension: (n) => dims.overworld,
   getAllPlayers: () => dims.overworld.getPlayers(),
   dynamicProps: new Map(),
-  setDynamicProperty(k, v) { this.dynamicProps.set(k, v); },
+  setDynamicProperty(k, v) {
+    if (v === undefined || v === null) this.dynamicProps.delete(k);
+    else this.dynamicProps.set(k, v);
+  },
   getDynamicProperty(k) { return this.dynamicProps.get(k); },
   day: 1, timeOfDay: 0,
   getDay() { return this.day; },

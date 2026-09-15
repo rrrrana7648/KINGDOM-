@@ -7,10 +7,12 @@
  * Workers collect into a per-trip carry, then deliver to a registered stockpile
  * chest (real items) or the town anchor (virtual stockpile ledger).
  */
-import { BlockPermutation, ItemStack } from "@minecraft/server";
+import { BlockPermutation } from "@minecraft/server";
 import { walkToward, distanceXZ } from "./movement.js";
 import { getEntity, refreshNameTag } from "./npcRegistry.js";
 import { SKILL_MULT } from "../core/economist.js";
+import { sellLoad, buyerForCommodity } from "../economy/buyers.js";
+import { categoryOf } from "../economy/pricebook.js";
 
 const ZONE_FOR_JOB = {
   woodcutter: "forest",
@@ -70,7 +72,6 @@ const XP_WEIGHT = {
   "minecraft:emerald": 40, "minecraft:diamond": 100,
 };
 const LEVEL_XP = [0, 100, 300, 700, 1500]; // cumulative to L2..L5
-const FOOD_ITEMS = new Set(["minecraft:wheat", "minecraft:carrot", "minecraft:potato", "minecraft:beetroot", "minecraft:bread"]);
 
 // Per-session worker memory: not saved.
 const runtime = new Map();
@@ -163,60 +164,38 @@ export function performWork(record, state, tick) {
   return { ok: true, status: "harvested" };
 }
 
-/** End-of-shift / forced delivery. */
+/** End-of-shift / forced delivery (sells at the matching licensed buyer). */
 export function deliver(record, state, memArg) {
   const dim = record._dim;
   const entity = record._entity ?? getEntity(record, dim);
   if (!entity) return { ok: false, reason: "unloaded" };
   const mem = memArg ?? rt(record.id);
+  if (Object.keys(mem.carry).length === 0) return { ok: true, status: "delivered" };
 
-  const chest = state.zones.stockpileChest;
-  const anchor = chest ?? state.zones.home ?? state.zones.town;
-  if (!anchor) return { ok: false, reason: "noanchor" };
+  // Route: the licensed stall for this commodity, else the Crown warehouse,
+  // else the town anchor for virtual delivery.
+  const firstItem = Object.keys(mem.carry)[0];
+  const cat = categoryOf(firstItem);
+  const stall = cat ? buyerForCommodity(state, cat) : undefined;
+  const dest = stall?.chest ?? state.zones.stockpileChest ?? state.zones.home ?? state.zones.town;
+  if (!dest) return { ok: false, reason: "noanchor" };
 
-  if (distanceXZ(entity.location, anchor) > 2.4) {
-    walkToward(entity, anchor, { arrive: 2.2, speed: 0.9 });
+  if (distanceXZ(entity.location, dest) > 2.2) {
+    walkToward(entity, dest, { arrive: 2.0, speed: 0.9 });
     return { ok: true, status: "delivering" };
   }
 
-  // Arrived — count everything into the ledger.
+  const result = sellLoad(record, state, dim, mem.carry);
   let xp = 0;
-  const delivered = [];
-  for (const [item, qty0] of Object.entries(mem.carry)) {
-    let qty = qty0;
-    if (FOOD_ITEMS.has(item)) state.foodStock += qty;
-    else state.stockpile[item] = (state.stockpile[item] ?? 0) + qty;
+  for (const [item, qty] of Object.entries(result.accepted)) {
     state.dayProduction[item] = (state.dayProduction[item] ?? 0) + qty;
     record.day.delivered += qty;
-    xp += (XP_WEIGHT[item] ?? (item.includes("log") ? 3 : item.includes("crop") || FOOD_ITEMS.has(item) ? 2 : 1)) * qty;
-    delivered.push([item, qty]);
+    xp += (XP_WEIGHT[item] ?? (item.includes("log") ? 3 : 2)) * qty;
   }
-
-  // Physical chest fill (anything that doesn't fit stays in the virtual ledger).
-  if (chest) {
-    const cb = safeBlock(dim, chest.x, chest.y, chest.z);
-    const inv = cb?.getComponent("inventory");
-    const container = inv?.container;
-    if (container) {
-      for (const [item, qty] of delivered) {
-        let remaining = qty;
-        while (remaining > 0) {
-          const n = Math.min(64, remaining);
-          const leftover = container.addItem(new ItemStack(item, n));
-          if (!leftover) {
-            remaining = 0;
-          } else {
-            // Chest full — the remainder stays counted in the virtual ledger.
-            break;
-          }
-        }
-      }
-    }
-  }
-
+  // Rejected goods (quota/float full) stay in the carry for tomorrow's trip.
+  mem.carry = { ...result.rejected };
   grantXp(record, entity, xp);
-  mem.carry = {};
-  return { ok: true, status: "delivered" };
+  return { ok: true, status: "delivered", result };
 }
 
 /* -------------------------------------------------------------- */

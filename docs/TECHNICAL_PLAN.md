@@ -67,7 +67,7 @@ KINGDOM-/
 |---|---|---|---|
 | M1 | `/kingdom:start` founding modal, Minister + 2M/2W settlers, scepter menu, clock HUD, day counter, save/load, economist tables | `main`, `state`, `founding`, `citizens`, `hud`, `clock`, `economist` | ✅ built |
 | **M2 (current)** | follow/life orders, daily schedule state machine, needs & mood, XP/levels + speed, woodcutter/farmer/quarry labor loops, work-site zones, physical chest delivery, day-roll wages, death handling | `game/schedule`, `game/jobs`, `game/movement`, `game/npcRegistry`, `game/dayroll` (+ sim tests) | ✅ built |
-| M3 | warehouse chest zones, receiving clerk, licensed buyers, floats, ledgers | `economy/warehouse`, `economy/buyers` | ⬜ planned |
+| **M3 (built)** | warehouse chest routing, 7 licensed commodity buyer stalls, clerks, floats, quotas, price bands, A/B/C grades, crown salary vs freelance piece-rate, cart-runner consolidation, audit ledger (sharded saves v3) | `economy/buyers`, `economy/pricebook`, updated `jobs`/`dayroll`/`menu` | ✅ built |
 | M4 | market sim, tax engine, Day Roll GDP/net profit, reports | `economy/dayroll`, `economy/tax`, `economy/market` | ⬜ planned |
 | M5 | paper/ink/mint chain, inflation, bank loans & debt | `economy/mint`, `economy/bank` | ⬜ planned |
 | M6 | decrees + deadlines + managers, blueprint & scepter construction, upgrades | `game/decrees`, `build/construction`, `structures/` | ⬜ planned |

@@ -10,6 +10,7 @@ import { colonyMinutes } from "../core/clock.js";
 import { walkToward, distanceXZ } from "./movement.js";
 import { getEntity, refreshNameTag } from "./npcRegistry.js";
 import { performWork, deliver, resetRuntime } from "./jobs.js";
+import { buyerForCitizen } from "../economy/buyers.js";
 
 const OVERWORLD = () => world.getDimension("overworld");
 const leisureTargets = new Map();
@@ -69,6 +70,9 @@ function tickOne(record, entity, state, tick) {
     refreshNameTag(record, entity, PHASE.flee.icon);
     return;
   }
+
+  // Buyer clerks keep their stall counter rather than working sites.
+  if (record.profession === "buyer") return tickClerk(record, entity, state, hour, tick);
 
   if (hour >= 6 && hour < 7.5) phaseMeal(record, entity, state, "breakfast", hour);
   else if (hour >= 7.5 && hour < 12) phaseWork(record, entity, state, tick);
@@ -169,6 +173,29 @@ function ministerRoutine(record, entity, state, hour) {
     walkToward(entity, dest, { arrive: 1, speed: 0.4 });
     refreshNameTag(record, entity, "§6");
   }
+}
+
+/** Licensed buyer clerk: staff the stall counter, meals at town, sleep at home. */
+function tickClerk(record, entity, state, hour, tick) {
+  const buyer = buyerForCitizen(state, record.id);
+  decayNeeds(record, 0.02);
+  if (hour >= 6 && hour < 7.5) return phaseMeal(record, entity, state, "breakfast", hour);
+  if (hour >= 12 && hour < 13) return phaseMeal(record, entity, state, "lunch", hour);
+  if ((hour >= 7.5 && hour < 12) || (hour >= 13 && hour < 18)) {
+    if (buyer) {
+      const c = buyer.chest;
+      // Alternate between two spots beside the stall chest.
+      const east = tick % 240 < 120;
+      const spot = east
+        ? { x: c.x + 1.5, y: c.y, z: c.z + 0.5 }
+        : { x: c.x - 0.5, y: c.y, z: c.z + 0.5 };
+      walkToward(entity, spot, { arrive: 1.0, speed: 0.5 });
+    }
+    refreshNameTag(record, entity, "§b🛒");
+    return;
+  }
+  if (hour >= 18 && hour < 21) return phaseLeisure(record, entity, state, tick);
+  return phaseSleep(record, entity, state);
 }
 
 /* ---------------- meals & needs ---------------- */

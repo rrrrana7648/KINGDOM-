@@ -4,14 +4,14 @@
     "name": "KINGDOM Resource Pack",
     "description": "Custom art, models and sounds for the KINGDOM add-on (art pass: M12).",
     "uuid": "8f789717-a5a2-4208-8a3c-8e5e8e212141",
-    "version": [0, 1, 0],
+    "version": [0, 3, 0],
     "min_engine_version": [1, 21, 60]
   },
   "modules": [
     {
       "type": "resources",
       "uuid": "1cea9336-eb19-4b13-893a-a0ae44ae2e27",
-      "version": [0, 1, 0]
+      "version": [0, 3, 0]
     }
   ]
 }

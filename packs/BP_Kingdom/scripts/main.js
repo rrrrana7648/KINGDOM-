@@ -92,7 +92,7 @@ system.runInterval(() => {
   const currentDay = Math.max(1, worldDay - (state.foundedWorldDay ?? worldDay) + 1);
   if (currentDay !== state.day) {
     state.day = currentDay;
-    const report = runDayRoll(state);
+    const report = runDayRoll(state, world.getDimension("overworld"));
     for (const line of report.lines)
       for (const player of world.getAllPlayers()) player.sendMessage(line);
     saveState();
