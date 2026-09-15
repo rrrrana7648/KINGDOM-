@@ -1,0 +1,49 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "KINGDOM Behavior Pack",
+    "description": "Rule a living Victorian colony. \u00a76/kingdom:start \u00a7rto found your kingdom.",
+    "uuid": "2a1333df-1f9f-4254-9422-0feb3a41b245",
+    "version": [
+      0,
+      3,
+      0
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      60
+    ]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "1df3ac33-124a-4a23-afa5-069812599784",
+      "version": [
+        0,
+        3,
+        0
+      ],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.1.0"
+    },
+    {
+      "module_name": "@minecraft/server-ui",
+      "version": "2.0.0"
+    },
+    {
+      "uuid": "8f789717-a5a2-4208-8a3c-8e5e8e212141",
+      "version": [
+        0,
+        3,
+        0
+      ]
+    }
+  ]
+}

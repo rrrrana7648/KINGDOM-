@@ -1,0 +1,11 @@
+# Build artifacts (regenerate with tools/package.sh)
+dist/
+*.mcaddon
+*.mcpack
+*.zip
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
