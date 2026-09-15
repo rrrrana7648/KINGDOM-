@@ -36,6 +36,7 @@ export function constablePower(state) {
   }
   const militia = state.security?.militia;
   if (militia && state.day <= militia.untilDay) power += militia.count * 0.6;
+  if (state.appointees?.guardCaptain) power += 1; // M13: the Captain's rounds
   return power;
 }
 
@@ -65,6 +66,7 @@ export function crimePressure(state) {
     p += homeless * 0.1;
   }
   p -= constablePower(state) * 0.03;
+  if (state.curfew?.on) p -= 0.1; // M13: lamp-lit order
   return Math.max(0.01, Math.min(0.65, p));
 }
 

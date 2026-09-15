@@ -1,14 +1,19 @@
 /**
- * deck.js — the wheel of fortune: 16 living-world events (M10, §35–§36).
+ * deck.js — the wheel of fortune: 24 living-world events (M10 + M13, §35–§37).
  *
  * Each dawn (35%) fate draws one card whose conditions hold: mine collapses,
  * tenement fires, strikes, pirates, dignitaries, diamond strikes, bank runs,
- * omens, nomads, treasure maps and more. Most resolve at once with treasury,
- * mood and ledger effects; the weighty ones open a PENDING DECISION in
- * Audiences — two roads, the King's to choose, expiring in 2 days.
+ * omens, nomads, treasure maps — and M13's rackets, tributes, quakes, blight,
+ * fishing runs, lost travelers, trappers and brass bands. Most resolve at
+ * once with treasury, mood and ledger effects; the weighty ones open a
+ * PENDING DECISION in Audiences — two roads, the King's to choose, expiring
+ * in 2 days.
  */
 import { LEDGER_CAP } from "../core/state.js";
 import { handleInheritance } from "../social/housing.js";
+import { claim as claimInsurance } from "../economy/insurance.js";
+import { consign as consignLot } from "../economy/auction.js";
+import { defensePower } from "../security/guards.js";
 
 export function nextDecisionId(state) {
   return `x-${state.nextDecisionId++}`;
@@ -67,6 +72,12 @@ const EVENTS = [
     canFire: (s) => (s.houses ?? []).length >= 2 && (s.climate?.weather === "heatwave" || (s.climate?.droughtDays ?? 0) >= 3),
     fire(s, rng, out) {
       const house = (s.houses ?? [])[Math.floor(rng() * s.houses.length)];
+      const stationed = (s.buildings ?? []).some((b) => b.buildingId === "fire_station");
+      if (stationed && rng() < 0.7) {
+        out.lines.push(`§a🚒 Fire at ${house.name}! The pump-cart crews douse it flat — scorched paint, saved roofs.`);
+        ledgerEvent(s, "fire-contained", { house: house.name });
+        return;
+      }
       const homeless = [...house.residents];
       for (const id of homeless) {
         const c = s.citizens.find((x) => x.id === id);
@@ -75,8 +86,10 @@ const EVENTS = [
       s.houses = s.houses.filter((h) => h.id !== house.id);
       const damage = 25 + Math.floor(rng() * 30);
       s.treasury = Math.max(0, Math.round((s.treasury - damage) * 100) / 100);
-      out.lines.push(`§c🔥 TENEMENT FIRE! ${house.name} burned to the bricks — ${homeless.length} homeless, ₹${damage} lost. Brick rebuilds advised.`);
-      ledgerEvent(s, "fire", { house: house.name, damage });
+      const paid = claimInsurance(s, "fire").paid;
+      out.lines.push(`§c🔥 TENEMENT FIRE! ${house.name} burned to the bricks — ${homeless.length} homeless, ₹${damage} lost.` +
+        (paid > 0 ? ` The underwriters pay ₹${paid}.` : " Brick rebuilds advised."));
+      ledgerEvent(s, "fire", { house: house.name, damage, claim: paid });
     },
   },
   {
@@ -224,6 +237,12 @@ const EVENTS = [
     id: "spy", weight: 1,
     canFire: (s) => aliveAdults(s).length >= 10,
     fire(s, rng, out) {
+      if ((s.spies?.counterSpies ?? 0) > 0) {
+        out.lines.push("§a🕵️ A rival's spy is turned at the coffee house — false figures flow outward, true coin inward.");
+        s.treasury = Math.round((s.treasury + 15) * 100) / 100;
+        ledgerEvent(s, "spy-turned", { gain: 15 });
+        return;
+      }
       const gossip = 10 + Math.floor(rng() * 20);
       s.treasury = Math.max(0, Math.round((s.treasury - gossip) * 100) / 100);
       out.lines.push(`§8🕵️ A rival's SPY was caught copying the price book (₹${gossip} in bribes traced). Coffee-house tongues wag.`);
@@ -248,6 +267,104 @@ const EVENTS = [
       s.treasury = Math.round((s.treasury + royalty) * 100) / 100;
       out.lines.push(`§6⛏️ GOLD RUSH upriver! The Crown claims its royalty (₹${royalty}) and licenses the claims.`);
       ledgerEvent(s, "gold_rush", { royalty });
+    },
+  },
+  // ---- M13: rackets, tributes, quakes, blight, runs, rescues, furs, bands ----
+  {
+    id: "crime_racket", weight: 2,
+    canFire: (s) => {
+      let g = 0;
+      for (const c of s.citizens) if (c.alive && (c.profession === "guard" || c.profession === "soldier")) g++;
+      const poor = s.citizens.filter((c) => c.alive && c.ageStage === "adult" && (c.savings ?? 0) < 5).length;
+      return g < 2 && poor >= 3;
+    },
+    fire(s, rng, out) {
+      decide(s, "crime_racket", "🗡️ Protection racket",
+        "A velvet-voiced 'club' demands ₹60 from every stall — pay the dogs, or raid the den (needs 2+ guards)?",
+        [
+          { id: "pay", label: "Pay ₹60 hush", desc: "Stalls breathe, shame festers" },
+          { id: "raid", label: "Raid the den", desc: "Needs 2+ guards; contraband for the block" },
+        ]);
+      out.lines.push("§c🗡️ A PROTECTION RACKET squeezes the stalls! The King's writ is needed (Audiences).");
+    },
+  },
+  {
+    id: "tribute_demand", weight: 1,
+    canFire: (s) => s.treasury >= 150,
+    fire(s, rng, out) {
+      decide(s, "tribute_demand", "👑 Bandit king's tribute",
+        "The self-styled King of the Hills demands ₹100 'for the peace of the roads'. Pay the thief — or answer with steel?",
+        [
+          { id: "pay", label: "Pay ₹100", desc: "Peace, priced" },
+          { id: "fight", label: "Answer with steel", desc: "The garrison decides" },
+        ]);
+      out.lines.push("§c👑 A BANDIT KING demands tribute! Pay or fight (Audiences).");
+    },
+  },
+  {
+    id: "earthquake", weight: 1,
+    canFire: (s) => (s.buildings ?? []).length >= 3,
+    fire(s, rng, out) {
+      const fortress = (s.buildings ?? []).some((b) => b.buildingId === "fortress");
+      const damage = fortress ? 20 + Math.floor(rng() * 20) : 40 + Math.floor(rng() * 60);
+      s.treasury = Math.max(0, Math.round((s.treasury - damage) * 100) / 100);
+      out.lines.push(`§6⛰️ EARTHQUAKE! Chimneys dance, plaster rains — ₹${damage} in repairs.` +
+        (fortress ? " The fortress holds; the town shelters in its shadow." : ""));
+      ledgerEvent(s, "earthquake", { damage });
+    },
+  },
+  {
+    id: "blight", weight: 2,
+    canFire: (s) => !!s.zones?.farm,
+    fire(s, rng, out) {
+      const master = s.appointees?.farmMaster;
+      let eaten = 15 + Math.floor(rng() * 25);
+      if (master) eaten = Math.floor(eaten / 2);
+      eaten = Math.min(s.foodStock, eaten);
+      s.foodStock -= eaten;
+      out.lines.push(`§6🦠 BLIGHT on the fields — ${eaten} rations wither.` +
+        (master ? " The Farm Master's pruning halves the rot." : ""));
+      ledgerEvent(s, "blight", { eaten });
+    },
+  },
+  {
+    id: "fishing_run", weight: 1,
+    canFire: (s) => (s.harbor?.level ?? 0) >= 1,
+    fire(s, rng, out) {
+      const catchN = 20 + Math.floor(rng() * 20);
+      s.foodStock += catchN;
+      for (const c of s.citizens) if (c.alive) c.mood = Math.min(100, (c.mood ?? 70) + 2);
+      out.lines.push(`§a🐟 The fishing runs are in! +${catchN} rations, and every pot smells of the sea.`);
+      ledgerEvent(s, "fishing_run", { catch: catchN });
+    },
+  },
+  {
+    id: "lost_travelers", weight: 1,
+    canFire: (s) => s.citizens.some((c) => c.alive && (c.profession === "guard" || c.profession === "soldier")),
+    fire(s, rng, out) {
+      s.workforce.pendingHires = (s.workforce?.pendingHires ?? 0) + 2;
+      for (const c of s.citizens) if (c.alive) c.mood = Math.min(100, (c.mood ?? 70) + 2);
+      out.lines.push("§a🧭 Guards guide 2 lost travelers in from the hills — they ask for work and bread, and stay.");
+      ledgerEvent(s, "lost_travelers", { souls: 2 });
+    },
+  },
+  {
+    id: "trapper_parley", weight: 1,
+    canFire: (s) => aliveAdults(s).length >= 4,
+    fire(s, rng, out) {
+      const proceeds = 15 + Math.floor(rng() * 15);
+      s.treasury = Math.round((s.treasury + proceeds) * 100) / 100;
+      out.lines.push(`§a🦊 Frontier trappers parley at the gates — fine pelts fetch ₹${proceeds} for the Crown.`);
+      ledgerEvent(s, "trapper_parley", { proceeds });
+    },
+  },
+  {
+    id: "brass_band", weight: 1,
+    canFire: (s) => s.citizens.filter((c) => c.alive && (c.profession === "guard" || c.profession === "soldier")).length >= 2,
+    fire(s, rng, out) {
+      for (const c of s.citizens) if (c.alive) c.mood = Math.min(100, (c.mood ?? 70) + 4);
+      out.lines.push("§d🎺 The garrison band marches at dusk — morale soars on brass (+mood).");
+      ledgerEvent(s, "brass_band", {});
     },
   },
 ];
@@ -415,6 +532,56 @@ const DECISIONS = {
       return "§7🗺️ Sand, crabs, and a waterlogged boot. The fisherman has left town.";
     }
     return "§7🗺️ Tall tales, wisely declined.";
+  },
+  // ---- M13 ----
+  crime_racket(s, opt) {
+    if (opt === "pay") {
+      const hush = Math.min(60, Math.max(0, s.treasury));
+      s.treasury = Math.round((s.treasury - hush) * 100) / 100;
+      s.security.unrest = Math.min(100, (s.security.unrest ?? 0) + 3);
+      for (const c of s.citizens) if (c.alive) c.mood = Math.max(5, (c.mood ?? 70) - 2);
+      return `§7🗡️ Hush money (₹${hush}). The stalls breathe; the town's pride festers.`;
+    }
+    const guards = s.citizens.filter((c) => c.alive && (c.profession === "guard" || c.profession === "soldier")).length;
+    if (guards >= 2) {
+      consignLot(s, "racket contraband (silks & strongboxes)", 60);
+      for (const c of s.citizens) if (c.alive) c.mood = Math.min(100, (c.mood ?? 70) + 3);
+      return "§a🗡️ The den is raided at dawn! Contraband goes to the auction block; the bazaar cheers.";
+    }
+    const stall = (s.buyers ?? []).find((b) => b.active);
+    if (stall) stall.active = false;
+    s.security.unrest = Math.min(100, (s.security.unrest ?? 0) + 5);
+    return "§c🗡️ Too few constables — the raid fails and a stall shutters in fear. Post guards first.";
+  },
+  tribute_demand(s, opt) {
+    if (opt === "pay") {
+      const tribute = Math.min(100, Math.max(0, s.treasury));
+      s.treasury = Math.round((s.treasury - tribute) * 100) / 100;
+      s.dailyStats.security = Math.round(((s.dailyStats.security ?? 0) + tribute) * 100) / 100;
+      return `§7👑 Tribute paid (₹${tribute}). The hills are quiet — at a price.`;
+    }
+    const power = defensePower(s);
+    const foe = Math.round(40 + s.day * 0.3);
+    if (power >= foe) {
+      for (const c of s.citizens) if (c.alive) c.mood = Math.min(100, (c.mood ?? 70) + 4);
+      return `§a👑 The garrison answers with steel (${power} vs ${foe})! The 'king' flees barefoot. Ballads by dusk.`;
+    }
+    const loot = Math.min(120, Math.max(0, Math.floor(s.treasury * 0.15)));
+    s.treasury = Math.round((s.treasury - loot) * 100) / 100;
+    s.security.unrest = Math.min(100, (s.security.unrest ?? 0) + 5);
+    return `§c👑 Steel answered steel (${power} vs ${foe}) — and lost. The hills take ₹${loot}.`;
+  },
+  workforce(s, opt, data) {
+    const short = data?.short ?? 2;
+    if (opt === "hire") {
+      const cost = short * 5;
+      if (cost > s.treasury) return "§cThe purse is too light — the foremen spit and wait.";
+      s.treasury = Math.round((s.treasury - cost) * 100) / 100;
+      s.workforce.pendingHires = (s.workforce?.pendingHires ?? 0) + short;
+      return `§a🙋 ${short} willing hands hired off the road (₹${cost}) — they report at dawn.`;
+    }
+    s.security.unrest = Math.min(100, (s.security.unrest ?? 0) + 1);
+    return "§7🙋 The foremen shrug and stretch the deadlines. The Minister notes your patience.";
   },
 };
 

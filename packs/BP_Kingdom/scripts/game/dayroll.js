@@ -15,6 +15,7 @@
  *  13. M9 the chain gang · M9 raids · M10 research & fate
  *  14. mood from the day that just ended (+ M6–M10 modifiers)
  *  15. M9 the streets: petitions → protests → riots → rebellion
+ *  15b. M13 society, ventures, industry, shadows + victory parades
  *  16. M4 books: GDP & net profit · M5 inflation tick
  *  17. morning float funding for licensed buyers
  *  18. the morning report
@@ -39,6 +40,26 @@ import { tickCrime, constablePower } from "../security/crime.js";
 import { tickPrison } from "../security/courts.js";
 import { tickDefense, securityRating } from "../security/guards.js";
 import { tickUnrest, unrestLevel } from "../security/unrest.js";
+import { tickSpies } from "../security/spies.js";
+import { tickCurfew } from "../security/curfew.js";
+import { tickArmory, victoryParade } from "../security/armory.js";
+import { tickPrestige, tickHalls, tierIcon } from "../society/prestige.js";
+import { tickCalendar } from "../society/calendar.js";
+import { tickLiteracy } from "../society/literacy.js";
+import { tickHearth, weddingGifts } from "../society/hearth.js";
+import { tickCensus } from "../society/census.js";
+import { tickCaravans } from "../economy/caravans.js";
+import { tickBonds } from "../economy/bonds.js";
+import { tickContracts } from "../economy/contracts.js";
+import { tickInsurance } from "../economy/insurance.js";
+import { tickPawn } from "../economy/pawnshop.js";
+import { tickAuction } from "../economy/auction.js";
+import { tickTools } from "../industry/tools.js";
+import { tickWorkforce } from "./workforce.js";
+import { tickAppointees } from "./appointees.js";
+import { tickSatellites } from "../world/satellites.js";
+import { tickExpeditions } from "../world/expeditions.js";
+import { spawnMigrant } from "./citizens.js";
 import { freshStats } from "../core/state.js";
 
 function freshDay() {
@@ -75,7 +96,7 @@ export function runDayRoll(state, dim, rng = Math.random) {
   let wagesPaid = 0;
   for (const c of state.citizens) {
     if (!c.alive || c.ageStage !== "adult") continue;
-    const onSalary = c.role === "minister" || (c.mode === "living" && c.wageMode !== "freelance" && c.status !== "prisoner");
+    const onSalary = c.role === "minister" || (c.mode === "living" && c.wageMode !== "freelance" && c.status !== "prisoner" && !c.retired);
     if (onSalary) {
       const wage = Math.round(c.wage * 100) / 100;
       state.treasury = Math.round((state.treasury - wage) * 100) / 100;
@@ -151,6 +172,40 @@ export function runDayRoll(state, dim, rng = Math.random) {
   // 15. The streets answer the mood.
   const unrest = tickUnrest(state, rng);
 
+  // 15b. M13: the hundred-features dawn — society, ventures, industry, shadows.
+  const venturesBefore = state.treasury;
+  const prestige = tickPrestige(state);
+  const halls = tickHalls(state);
+  const calendar = tickCalendar(state);
+  const literacy = tickLiteracy(state);
+  const hearth = tickHearth(state, rng);
+  const giftLines = weddingGifts(state, family.weddings);
+  const census = tickCensus(state);
+  const caravans = tickCaravans(state, rng);
+  const bonds = tickBonds(state);
+  const contracts = tickContracts(state);
+  const insurance = tickInsurance(state);
+  const pawn = tickPawn(state, rng);
+  const auction = tickAuction(state, rng);
+  const tools = tickTools(state);
+  const workforce = tickWorkforce(state, (s) => {
+    const c = spawnMigrant(s, dim, "laborer");
+    if (c) {
+      c.mode = "living";
+      c.status = "working";
+    } else {
+      throw new Error("no room on the road");
+    }
+  });
+  const desks = tickAppointees(state, bank);
+  const satellites = tickSatellites(state);
+  const expeditions = tickExpeditions(state, rng);
+  const spies = tickSpies(state, rng);
+  const curfew = tickCurfew(state);
+  const armory = tickArmory(state);
+  const parade = defense.won ? victoryParade(state) : null;
+  const venturesNet = Math.round((state.treasury - venturesBefore) * 100) / 100;
+
   // 16. The books: GDP & net, then the inflation tick.
   const goods = goodsValue(state.dayProduction);
   const harborNet = state.dailyStats.harborNet ?? 0;
@@ -200,6 +255,7 @@ export function runDayRoll(state, dim, rng = Math.random) {
     `§7  Market §f₹${market.volume} §7(§f${market.shoppers} §7shoppers) | taxes §e₹${tax.total} §7(income ₹${tax.income}, head ₹${tax.head}, land ₹${tax.land}) | rents §e₹${rents.rent} | fines §e₹${Math.round((state.dailyStats.fines ?? 0) * 100) / 100}`,
     `§7  Meals §f${state.dailyStats.mealsEaten} §7eaten · §c${state.dailyStats.mealsMissed} §7missed`,
     `§7  🛡️ security §f${securityRating(state)} §7| 🌑 cases §f${openCases.length} §7(§f${docket} §7ready) | ✊ unrest §f${Math.round(state.security.unrest)} §7(${(unrestLevel(state.security.unrest))}) | 🤒 sick §f${health.sick}`,
+    `§7  ${tierIcon(state.prestige?.tier ?? "Camp")} ${state.prestige?.tier ?? "Camp"} §f${state.prestige?.score ?? 0} §7| ventures ${venturesNet >= 0 ? "§a+" : "§c"}₹${venturesNet} §7| 🕵️ agents §f${(state.spies?.agents ?? []).length} §7| 🔫 muskets §f${state.armory?.muskets ?? 0}`,
     `§7  ${inflation.line}`,
   );
   if (tech.completed) {
@@ -219,7 +275,7 @@ export function runDayRoll(state, dim, rng = Math.random) {
   } else {
     lines.push("§8  No production — release citizens and mark work sites.");
   }
-  for (const l of [...climate.lines, ...family.lines, ...missions.lines, ...harbor.lines, ...health.lines, ...crime.lines, ...decrees.lines, ...construction.lines, ...bank.lines, ...prison.lines, ...defense.lines, ...tech.lines, ...fate.lines, ...unrest.lines]) {
+  for (const l of [...climate.lines, ...family.lines, ...missions.lines, ...harbor.lines, ...health.lines, ...crime.lines, ...decrees.lines, ...construction.lines, ...bank.lines, ...prison.lines, ...defense.lines, ...tech.lines, ...fate.lines, ...unrest.lines, ...prestige.lines, ...halls.lines, ...calendar.lines, ...literacy.lines, ...hearth.lines, ...giftLines, ...census.lines, ...caravans.lines, ...bonds.lines, ...contracts.lines, ...insurance.lines, ...pawn.lines, ...auction.lines, ...tools.lines, ...workforce.lines, ...desks.lines, ...satellites.lines, ...expeditions.lines, ...spies.lines, ...curfew.lines, ...armory.lines, ...(parade ? [parade] : [])]) {
     lines.push(`§7  ${l}`);
   }
 
@@ -244,6 +300,9 @@ export function runDayRoll(state, dim, rng = Math.random) {
     gdp: books.gdp, net: books.net, market, tax, rents,
     bank, family, missions, harbor, decrees, construction, inflation,
     climate, health, crime, prison, defense, tech, fate, unrest,
+    prestige, halls, calendar, literacy, hearth, census, caravans, bonds,
+    contracts, insurance, pawn, auction, tools, workforce, desks,
+    satellites, expeditions, spies, curfew, armory, parade, venturesNet,
     constables: constablePower(state),
   };
 }

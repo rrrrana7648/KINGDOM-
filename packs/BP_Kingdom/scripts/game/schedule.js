@@ -16,6 +16,7 @@ import { performWork, deliver, resetRuntime } from "./jobs.js";
 import { buyerForCitizen } from "../economy/buyers.js";
 import { performBuild } from "../build/construction.js";
 import { tickCourtship } from "../social/family.js";
+import { isRestDay } from "../society/calendar.js";
 
 const OVERWORLD = () => world.getDimension("overworld");
 const leisureTargets = new Map();
@@ -99,8 +100,31 @@ function tickOne(record, entity, state, tick) {
     return;
   }
 
-  // 🎪 Festival day: the whole town takes leisure — except the watch.
-  if (state.festivalDay === state.day) {
+  // M13: the away eat from packs off-map; the retired doze; mourners keep home.
+  if (record.status === "away") {
+    record.day.meals = 3;
+    record.needs.food = Math.min(100, Math.max(record.needs.food, 80));
+    refreshNameTag(record, entity, "§7🧭");
+    return;
+  }
+  if (record.retired) {
+    if ((hour >= 6 && hour < 7.5) || (hour >= 12 && hour < 13)) return phaseMeal(record, entity, state, hour < 12 ? "breakfast" : "lunch");
+    if (hour >= 21 || hour < 6) return phaseSleep(record, entity, state);
+    return phaseLeisure(record, entity, state, tick);
+  }
+  if ((record.mourning ?? 0) > 0) {
+    decayNeeds(record, 0.015);
+    const home = homeAnchor(record, state);
+    if (home && distanceXZ(entity.location, home) > 3) {
+      walkToward(entity, home, { arrive: 2.4, speed: 0.5 });
+    }
+    record.needs.leisure = Math.min(100, record.needs.leisure + 0.15);
+    refreshNameTag(record, entity, "§8⚱️");
+    return;
+  }
+
+  // 🎪 Festival day (and 🕯️ sabbath rest): the town takes leisure — except the watch.
+  if (state.festivalDay === state.day || isRestDay(state)) {
     if (record.profession === "guard" || record.profession === "soldier") {
       phaseWork(record, entity, state, tick); // the watch never feasts
       return;

@@ -15,14 +15,30 @@ import { postBounty } from "../security/crime.js";
 import { conscript, securityRating, guardRoster } from "../security/guards.js";
 import { proclaimFestival } from "../events/seasons.js";
 import { resolveDecision } from "../events/deck.js";
+import { knightCitizen, awardMedal } from "../society/titles.js";
+import { literacyRate } from "../society/literacy.js";
+import { sendCaravan } from "../economy/caravans.js";
+import { issueBonds } from "../economy/bonds.js";
+import { postContract, takeContract } from "../economy/contracts.js";
+import { charterVillage } from "../world/satellites.js";
+import { launchExpedition, EXPEDITIONS } from "../world/expeditions.js";
+import { plantAgent } from "../security/spies.js";
+import { buyMuskets } from "../security/armory.js";
 
 const R = (n) => Math.round(n * 100) / 100;
 
 function help() {
   return [
     "§6!orders — §7treasury · status · mood · docket · cases · decide · judge · bounty · muster · festival · ration · tech · officers · grant · advance",
+    "§6!orders² — §7knight · medal · literacy · caravan · bonds · contract · village · voyage · agent · musket",
     "§7e.g. !judge k-3 fine · !bounty \"Rana Thief\" 50 · !muster 4 · !decide x-1 grand",
   ];
+}
+
+function byName(state, text) {
+  const q = (text ?? "").trim().toLowerCase();
+  if (!q) return null;
+  return state.citizens.find((c) => c.alive && (c.id === q || (c.fullName ?? "").toLowerCase() === q || (c.fullName ?? "").toLowerCase().includes(q))) ?? null;
 }
 
 function statusLines(state) {
@@ -220,6 +236,97 @@ export function parseCommand(state, senderName, raw, helpers = {}) {
       if (!gate("officers")) break;
       out.lines.push(`§7🌅 Days turn with the sun — dawn of Day ${state.day + 1} comes on its own arc. Patience, Majesty.`);
       break;
+
+    // ---- M13 writs ----
+    case "knight": {
+      if (!gate("decree")) break;
+      const c = byName(state, parts.join(" "));
+      if (!c) { out.lines.push("§cWho kneels? §7(!knight <name>)"); break; }
+      const r = knightCitizen(state, c.id);
+      out.lines.push(r.ok ? `§a⚔️ Arise, ${r.name}!` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "medal": {
+      if (!gate("decree")) break;
+      const c = byName(state, parts.join(" "));
+      if (!c) { out.lines.push("§cWhose breast? §7(!medal <name>)"); break; }
+      const r = awardMedal(state, c.id);
+      out.lines.push(r.ok ? `§a🎖️ ${c.fullName} is decorated!` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "literacy": {
+      const lr = literacyRate(state);
+      const teachers = state.citizens.filter((c) => c.alive && c.profession === "teacher").length;
+      const press = (state.buildings ?? []).some((b) => b.buildingId === "gazette");
+      out.lines.push(`§7📚 Literacy §f${lr}% §7· teachers §f${teachers} §7· press ${press ? "§arolling" : "§8none"} §7· gazette ${state.literacy?.gazette ?? true ? "§aloud" : "§8silent"}`);
+      break;
+    }
+    case "caravan": {
+      if (!gate("spend")) break;
+      const loads = { timber: { "minecraft:oak_log": 32 }, stone: { "minecraft:cobblestone": 48 }, grain: { "minecraft:wheat": 32 } };
+      const load = loads[(parts[0] ?? "").toLowerCase()];
+      if (!load) { out.lines.push("§cWhich train? §7(!caravan timber|stone|grain)"); break; }
+      const r = sendCaravan(state, load);
+      out.lines.push(r.ok ? `§a🐪 Caravan ${r.caravan.id} lumbers out (home day ${r.caravan.returnDay}).` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "bonds": {
+      if (!gate("spend")) break;
+      const n = Math.max(1, Math.min(10, Number(parts[0] ?? 3) || 3));
+      const r = issueBonds(state, n);
+      out.lines.push(r.ok ? `§a📜 Sold ${r.sold} bonds (+₹${r.raised}).` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "contract": {
+      if (!gate("spend")) break;
+      const i = Number(parts[0] ?? 0);
+      const r = postContract(state, i);
+      out.lines.push(r.ok ? `§a📋 Commission ${r.contract.id} posted (${r.contract.qty} ${r.contract.item.replace("minecraft:", "")}, ₹${r.contract.payout}).` : `§c${r.reason} §7(!contract 0..3)`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "village": {
+      if (!gate("spend")) break;
+      const m = rest.match(/^(?:"([^"]+)"|(\S+))\s+(.+)$/);
+      if (!m) { out.lines.push("§cName it and name its governor. §7(!village <name> <governor>)"); break; }
+      const g = byName(state, m[3]);
+      if (!g) { out.lines.push(`§cNo governor found for "${m[3]}".`); break; }
+      const r = charterVillage(state, m[1] ?? m[2], g.id);
+      out.lines.push(r.ok ? `§a🏘️ The charter is sealed — ${r.village.name} rises!` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "voyage": {
+      if (!gate("spend")) break;
+      const kinds = Object.keys(EXPEDITIONS);
+      const kind = kinds.includes((parts[0] ?? "").toLowerCase()) ? parts[0].toLowerCase() : null;
+      const leader = kind ? byName(state, parts.slice(1).join(" ")) : null;
+      if (!kind || !leader) { out.lines.push(`§cWho sails where? §7(!voyage ${kinds.join("|")} <leader>)`); break; }
+      const pool = state.citizens.filter((c) => c.alive && c.ageStage === "adult" && c.id !== leader.id && c.role !== "minister" && c.status !== "prisoner" && !c.fugitive && c.status !== "away");
+      const r = launchExpedition(state, kind, leader.id, pool.slice(0, EXPEDITIONS[kind].crew - 1).map((c) => c.id));
+      out.lines.push(r.ok ? `§a🧭 The ${EXPEDITIONS[kind].name} departs under ${leader.fullName}!` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "agent": {
+      if (!gate("military")) break;
+      const r = plantAgent(state);
+      out.lines.push(r.ok ? `§a🕵️ ${r.agent.name} vanishes abroad with a new face.` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
+    case "musket": {
+      if (!gate("military")) break;
+      const n = Math.max(1, Math.min(20, Number(parts[0] ?? 4) || 4));
+      const r = buyMuskets(state, n);
+      out.lines.push(r.ok ? `§a🔫 ${n} muskets racked (₹${r.cost}).` : `§c${r.reason}`);
+      if (r.ok) out.mutated = true;
+      break;
+    }
 
     default:
       out.lines.push(`§cUnknown order "!${cmd}". §7Say !help.`);

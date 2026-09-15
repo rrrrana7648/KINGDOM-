@@ -48,6 +48,20 @@ import { resolveDecision } from "../events/deck.js";
 import { techList, startResearch, grantResearch, dailyRP } from "../tech/tree.js";
 import { claimCrown, roleOf, require as need, grantOfficer, revokeOfficer, officerList, OFFICER_ROLES } from "../net/roles.js";
 import { sting } from "../core/sounds.js";
+import { tierIcon } from "../society/prestige.js";
+import { knightCitizen, awardMedal, paintCrest } from "../society/titles.js";
+import { literacyRate } from "../society/literacy.js";
+import { DESKS, appoint, holder } from "./appointees.js";
+import { workloadPct, handsShort } from "./workforce.js";
+import { sendCaravan } from "../economy/caravans.js";
+import { issueBonds, redeemBond, BOND_FACE } from "../economy/bonds.js";
+import { CONTRACT_OFFERS, postContract, takeContract } from "../economy/contracts.js";
+import { setPolicy, FIRE_PREMIUM, FIRE_PAYOUT, MARINE_PREMIUM, MARINE_PAYOUT } from "../economy/insurance.js";
+import { TIERS as TOOL_TIERS, TIER_COST, TIER_PRICE, orderTools, wantTier } from "../industry/tools.js";
+import { charterVillage, CHARTER_COST } from "../world/satellites.js";
+import { EXPEDITIONS, launchExpedition } from "../world/expeditions.js";
+import { plantAgent, hireCounterSpy, AGENT_COST, COUNTER_COST } from "../security/spies.js";
+import { effectiveGuards, forgeMusket, buyMuskets, MUSKET_COST } from "../security/armory.js";
 
 /** Gated writs: returns true when the player may proceed. */
 function writ(player, state, action) {
@@ -111,6 +125,10 @@ export async function openMainMenu(player) {
     .button(`⚖️ Court & Watch${docket > 0 ? ` (${docket})` : ""}`)
     .button("🌦 Sky & Research")
     .button("🕯️ Officers & Orders")
+    .button("🏛️ Court & Society")
+    .button("🧭 Ventures & Exchange")
+    .button("🏭 Industry & Workforce")
+    .button("🛡️ Garrison & Shadows")
     .button("📒 Audit Ledger")
     .button("📈 Growth Policy")
     .button("⏰ Clock & Day Settings");
@@ -130,9 +148,13 @@ export async function openMainMenu(player) {
     case 10: return openCourt(player);
     case 11: return openSky(player);
     case 12: return openOfficers(player);
-    case 13: return openLedger(player);
-    case 14: return openPopulationPolicy(player);
-    case 15: return openClockSettings(player);
+    case 13: return openSociety(player);
+    case 14: return openVentures(player);
+    case 15: return openIndustry(player);
+    case 16: return openGarrison(player);
+    case 17: return openLedger(player);
+    case 18: return openPopulationPolicy(player);
+    case 19: return openClockSettings(player);
   }
 }
 
@@ -1753,6 +1775,460 @@ async function openOfficers(player) {
     }
     default: return openMainMenu(player);
   }
+}
+
+/* ---------------- Court & Society (M13) ---------------- */
+
+async function openSociety(player) {
+  const state = getState();
+  const p = state.prestige ?? { score: 0, tier: "Camp" };
+  const desks = Object.entries(DESKS).map(([d, def]) => {
+    const h = holder(state, d);
+    return `${def.icon} ${def.name}: §f${h ? h.fullName : "— vacant —"}`;
+  }).join("\n");
+  const cal = state.calendar ?? {};
+  const form = new ActionFormData()
+    .title("🏛️ Court & Society")
+    .body(
+      `§7${tierIcon(p.tier)} Prestige: §f${p.tier} §7(${p.score} glory)\n` +
+      `§7📚 Literacy §f${literacyRate(state)}% §7· 📰 gazette ${state.literacy?.gazette ?? true ? "§arolling" : "§8silent"}\n` +
+      `§7🕯️ Sabbath ${cal.sabbathOn ? `§aon (every ${cal.sabbathEvery}d)` : "§8off"} §7· 🍰 feast day §f${cal.feastDay} §7· 🎖️ high days ${[cal.empireDay && "Empire", cal.harvestHome && "Harvest", cal.fireworks && "Fireworks"].filter(Boolean).join("/") || "none"}\n\n${desks}`
+    )
+    .button("🪑 Appoint desks")
+    .button("🗓️ Festival calendar")
+    .button("⚔️ Honors (knight/medal/crest)")
+    .button("📋 Census & pensions")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled) return;
+  switch (res.selection) {
+    case 0: return openDesks(player);
+    case 1: return openCalendar(player);
+    case 2: return openHonors(player);
+    case 3: return openCensusView(player);
+    default: return openMainMenu(player);
+  }
+}
+
+async function openDesks(player) {
+  const state = getState();
+  const form = new ActionFormData().title("🪑 Seven desks").body("§7Each held desk pays its writ every dawn. Felons need not apply.");
+  const keys = Object.keys(DESKS);
+  for (const d of keys) {
+    const h = holder(state, d);
+    form.button(`${DESKS[d].icon} ${DESKS[d].name}\n§7${h ? h.fullName : "— vacant —"} · ${DESKS[d].writ}`);
+  }
+  form.button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === keys.length) return openSociety(player);
+  const desk = keys[res.selection];
+  if (!writ(player, state, "decree")) return openDesks(player);
+  if (holder(state, desk)) {
+    appoint(state, desk, null);
+    saveState();
+    player.sendMessage(`§7🪑 The ${DESKS[desk].name}'s desk stands empty.`);
+    return openDesks(player);
+  }
+  return pickCitizen(player, DESKS[desk].name, `Name the ${DESKS[desk].name}:`, (s, id) => appoint(s, desk, id), openDesks);
+}
+
+async function openCalendar(player) {
+  const state = getState();
+  const cal = state.calendar;
+  const form = new ActionFormData()
+    .title("🗓️ Festival calendar")
+    .body(`§7Sabbath ${cal.sabbathOn ? `§aon (every ${cal.sabbathEvery} days)` : "§8off"} §7· feast day §f${cal.feastDay}§7/season\n§7High days: Empire ${cal.empireDay ? "§a✓" : "§8✗"} · Harvest ${cal.harvestHome ? "§a✓" : "§8✗"} · Fireworks ${cal.fireworks ? "§a✓" : "§8✗"}`)
+    .button(`${cal.sabbathOn ? "🕯️ End sabbath rest" : "🕯️ Begin sabbath rest"}`)
+    .button("🍰 Set feast day")
+    .button("🎖️ Toggle high days")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 3) return openSociety(player);
+  if (!writ(player, state, "decree")) return openCalendar(player);
+  if (res.selection === 0) {
+    cal.sabbathOn = !cal.sabbathOn;
+    saveState();
+    player.sendMessage(cal.sabbathOn ? "§d🕯️ The sabbath bell will ring weekly." : "§7🕯️ Every day a workday.");
+    return openCalendar(player);
+  }
+  if (res.selection === 1) {
+    const m = new ModalFormData().title("Feast day").slider("Season day (1–10)", 1, 10, 1, cal.feastDay);
+    const r = await m.show(player);
+    if (!r.canceled) {
+      cal.feastDay = Number(r.formValues[0]);
+      saveState();
+    }
+    return openCalendar(player);
+  }
+  cal.empireDay = !cal.empireDay && true;
+  // cycle: all on → empire off → harvest off → fireworks off → all on
+  if (cal.empireDay && cal.harvestHome && cal.fireworks) cal.empireDay = false;
+  else if (!cal.empireDay && cal.harvestHome && cal.fireworks) cal.harvestHome = false;
+  else if (!cal.empireDay && !cal.harvestHome && cal.fireworks) cal.fireworks = false;
+  else { cal.empireDay = true; cal.harvestHome = true; cal.fireworks = true; }
+  saveState();
+  return openCalendar(player);
+}
+
+async function openHonors(player) {
+  const state = getState();
+  const titled = state.citizens.filter((c) => c.alive && c.title).length;
+  const form = new ActionFormData()
+    .title("⚔️ Honors")
+    .body(`§7Titled §f${titled} §7souls. Knighthoods need Town dignity (₹100); medals need blooded guards (₹25); crests paint pride (₹15).`)
+    .button("⚔️ Dub a knight (₹100)")
+    .button("🎖️ Award a medal (₹25)")
+    .button("🛡️ Paint a house crest (₹15)")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 3) return openSociety(player);
+  if (!writ(player, state, "decree")) return openHonors(player);
+  if (res.selection === 0) {
+    return pickCitizen(player, "Dub a knight", "Who kneels for the sword?", (s, id) => knightCitizen(s, id), openHonors);
+  }
+  if (res.selection === 1) {
+    const guards = state.citizens.filter((c) => c.alive && (c.profession === "guard" || c.profession === "soldier"));
+    if (!guards.length) {
+      player.sendMessage("§7No guards to decorate.");
+      return openHonors(player);
+    }
+    const m = new ModalFormData().title("Award medal").dropdown("Guard", guards.map((g) => `${g.fullName} (${g.xp ?? 0}xp)`), 0);
+    const r = await m.show(player);
+    if (r.canceled) return openHonors(player);
+    const out = awardMedal(state, guards[Number(r.formValues[0])].id);
+    saveState();
+    player.sendMessage(out.ok ? `§a🎖️ ${guards[Number(r.formValues[0])].fullName} is decorated!` : `§c${out.reason}`);
+    if (out.ok) sting("trumpet");
+    return openHonors(player);
+  }
+  const houses = state.houses ?? [];
+  if (!houses.length) {
+    player.sendMessage("§7No houses to emblazon.");
+    return openHonors(player);
+  }
+  const m = new ModalFormData().title("House crest").dropdown("House", houses.map((h) => h.name), 0);
+  m.textField("Crest (emoji)", "🦁");
+  const r = await m.show(player);
+  if (r.canceled) return openHonors(player);
+  const out = paintCrest(state, houses[Number(r.formValues[0])].id, String(r.formValues[1] ?? "🦁"));
+  saveState();
+  player.sendMessage(out.ok ? "§a🛡️ The crest is painted; the house stands taller." : `§c${out.reason}`);
+  return openHonors(player);
+}
+
+async function openCensusView(player) {
+  const state = getState();
+  const hist = (state.census?.history ?? []).slice(-6).map((h) => `§7day ${h.day}: §f${h.souls} souls §7(${h.housed} housed)`).join("\n") || "§8No count yet — the clerks count every tenth dawn.";
+  const pens = state.citizens.filter((c) => c.alive && c.retired);
+  const form = new ActionFormData()
+    .title("📋 Census & pensions")
+    .body(`${hist}\n\n§7👴 Pensioners (₹3/day): ${pens.length ? pens.map((p) => p.fullName).join(", ") : "§8none yet — masters retire at 2000xp"}`)
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (!res.canceled) return openSociety(player);
+}
+
+/* ---------------- Ventures & Exchange (M13) ---------------- */
+
+async function openVentures(player) {
+  const state = getState();
+  const form = new ActionFormData()
+    .title("🧭 Ventures & Exchange")
+    .body(
+      `§7🐪 caravans out §f${(state.caravans ?? []).length} §7· 📜 bonds §f${(state.bonds ?? []).length} §7· 📋 contracts §f${(state.contracts ?? []).filter((c) => c.status === "open").length}\n` +
+      `§7📑 insurance ${state.insurance?.fire ? "§a🔥" : "§8🔥"}${state.insurance?.marine ? " §a⚓" : " §8⚓"} §7· 🏷️ pawn ${state.pawn?.policy} §7(${(state.pawn?.loans ?? []).length}) · 🔨 lots §f${(state.auction?.lots ?? []).length}\n` +
+      `§7🏘️ daughters §f${(state.satellites ?? []).length} §7· 🧭 expeditions out §f${(state.expeditions ?? []).filter((e) => e.status === "out").length}`
+    )
+    .button("🐪 Caravans")
+    .button("📜 Treasury bonds")
+    .button("📋 Supply contracts")
+    .button("📑 Insurance & pawn & auction")
+    .button("🏘️ Satellite villages")
+    .button("🧭 Expeditions")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled) return;
+  switch (res.selection) {
+    case 0: return openCaravans(player);
+    case 1: return openBonds(player);
+    case 2: return openContracts(player);
+    case 3: return openExchange(player);
+    case 4: return openSatellites(player);
+    case 5: return openExpeditions(player);
+    default: return openMainMenu(player);
+  }
+}
+
+async function openCaravans(player) {
+  const state = getState();
+  const out = (state.caravans ?? []).map((v) => `§7${v.id}: ₹${v.value} of goods, home day ${v.returnDay}`).join("\n") || "§8No trains on the road.";
+  const form = new ActionFormData()
+    .title("🐪 Caravans")
+    .body(`${out}\n\n§7128 logs? Load a train: 4 days over the hills, 30–70% margin, bandits possible. Guards fatten the odds.`)
+    .button("🪵 Timber train (32 logs)")
+    .button("🪨 Stone train (48 cobble)")
+    .button("🌾 Grain train (32 wheat)")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 3) return openVentures(player);
+  if (!writ(player, state, "spend")) return openCaravans(player);
+  const loads = [{ "minecraft:oak_log": 32 }, { "minecraft:cobblestone": 48 }, { "minecraft:wheat": 32 }];
+  const out2 = sendCaravan(state, loads[res.selection]);
+  saveState();
+  player.sendMessage(out2.ok ? `§a🐪 Caravan ${out2.caravan.id} lumbers out (home day ${out2.caravan.returnDay}).` : `§c${out2.reason}`);
+  return openCaravans(player);
+}
+
+async function openBonds(player) {
+  const state = getState();
+  const book = (state.bonds ?? []).map((b) => `§7${b.id}: ${b.holder} ₹${b.principal} (coupon day ${b.couponDay})`).join("\n") || "§8No bonds issued.";
+  const form = new ActionFormData()
+    .title("📜 Treasury bonds")
+    .body(`${book}\n\n§7₹${BOND_FACE} face, 5% coupon every 10 days. The wealthy subscribe; the Crown never — never — misses.`)
+    .button("📜 Issue bonds")
+    .button("💵 Redeem a bond")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 2) return openVentures(player);
+  if (!writ(player, state, "spend")) return openBonds(player);
+  if (res.selection === 0) {
+    const m = new ModalFormData().title("Issue bonds").slider("Offer (wealthy buy first)", 1, 10, 1, 3);
+    const r = await m.show(player);
+    if (!r.canceled) {
+      const out = issueBonds(state, Number(r.formValues[0]));
+      saveState();
+      player.sendMessage(out.ok ? `§a📜 Sold ${out.sold} bonds (+₹${out.raised}).` : `§c${out.reason}`);
+    }
+    return openBonds(player);
+  }
+  if (!state.bonds.length) {
+    player.sendMessage("§7No bonds to redeem.");
+    return openBonds(player);
+  }
+  const m = new ModalFormData().title("Redeem").dropdown("Bond", state.bonds.map((b) => `${b.id} ${b.holder} ₹${b.principal}`), 0);
+  const r = await m.show(player);
+  if (!r.canceled) {
+    const out = redeemBond(state, state.bonds[Number(r.formValues[0])].id);
+    saveState();
+    player.sendMessage(out.ok ? "§a📜 Redeemed at face." : `§c${out.reason}`);
+  }
+  return openBonds(player);
+}
+
+async function openContracts(player) {
+  const state = getState();
+  const open = (state.contracts ?? []).filter((c) => c.status === "open");
+  const lines = open.map((c) => {
+    const w = c.by ? state.citizens.find((x) => x.id === c.by)?.fullName ?? "?" : "none yet";
+    return `§7${c.id}: ${c.item.replace("minecraft:", "")} ${Math.floor(c.progress)}/${c.qty} · ₹${c.payout} · ${w} (laps D${c.expiryDay})`;
+  }).join("\n") || "§8The board is bare.";
+  const form = new ActionFormData()
+    .title("📋 Supply contracts")
+    .body(`${lines}\n\n§7Post commissions; contractors haul, the warehouse fills, the Crown pays.`)
+    .button("📌 Post a commission")
+    .button("🙋 Take a commission")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 2) return openVentures(player);
+  if (!writ(player, state, "spend")) return openContracts(player);
+  if (res.selection === 0) {
+    const m = new ModalFormData().title("Post commission").dropdown("Commission", CONTRACT_OFFERS.map((o) => `${o.item.replace("minecraft:", "")} ×${o.qty} — ₹${o.payout} (${o.days}d)`), 0);
+    const r = await m.show(player);
+    if (!r.canceled) {
+      const out = postContract(state, Number(r.formValues[0]));
+      saveState();
+      player.sendMessage(out.ok ? "§a📋 Posted on the board." : `§c${out.reason}`);
+    }
+    return openContracts(player);
+  }
+  if (!open.filter((c) => !c.by).length) {
+    player.sendMessage("§7No untaken commissions.");
+    return openContracts(player);
+  }
+  const m = new ModalFormData().title("Take commission").dropdown("Commission", open.filter((c) => !c.by).map((c) => `${c.id} ${c.item.replace("minecraft:", "")} ×${c.qty}`), 0);
+  const r = await m.show(player);
+  if (r.canceled) return openContracts(player);
+  const target = open.filter((c) => !c.by)[Number(r.formValues[0])];
+  return pickCitizen(player, "Contractor", `Who takes ${target.id}?`, (s, id) => takeContract(s, target.id, id), openContracts);
+}
+
+async function openExchange(player) {
+  const state = getState();
+  const ins = state.insurance ?? {};
+  const lots = (state.auction?.lots ?? []).map((l) => `§7${l.id}: ${l.desc} (~₹${l.value})`).join("\n") || "§8The block is empty.";
+  const form = new ActionFormData()
+    .title("📑 Exchange")
+    .body(`§7🔥 fire cover ${ins.fire ? `§aON (₹${FIRE_PREMIUM}/d → ₹${FIRE_PAYOUT})` : "§8off"} · ⚓ marine ${ins.marine ? `§aON (₹${MARINE_PREMIUM}/d → ₹${MARINE_PAYOUT})` : "§8off"}\n§7🏷️ pawn policy: §f${state.pawn?.policy} §7(${(state.pawn?.loans ?? []).length} out)\n\n${lots}`)
+    .button(`${ins.fire ? "🔥 Drop fire cover" : "🔥 Buy fire cover"}`)
+    .button(`${ins.marine ? "⚓ Drop marine cover" : "⚓ Buy marine cover"}`)
+    .button(`🏷️ Pawn: ${state.pawn?.policy === "allow" ? "BAN" : "ALLOW"}`)
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 3) return openVentures(player);
+  if (!writ(player, state, "spend")) return openExchange(player);
+  if (res.selection <= 1) {
+    const out = setPolicy(state, res.selection === 0 ? "fire" : "marine", res.selection === 0 ? !ins.fire : !ins.marine);
+    saveState();
+    player.sendMessage(out.ok ? "§a📑 Noted by the underwriters." : `§c${out.reason}`);
+    return openExchange(player);
+  }
+  state.pawn.policy = state.pawn.policy === "allow" ? "ban" : "allow";
+  saveState();
+  player.sendMessage(`§7🏷️ Pawnbroking ${state.pawn.policy === "allow" ? "licensed." : "banned — the fences grin."}`);
+  return openExchange(player);
+}
+
+async function openSatellites(player) {
+  const state = getState();
+  const list = (state.satellites ?? []).map((v) => `§7🏘️ ${v.name}: ${v.pop} souls, loyalty ${Math.round(v.loyalty)} (gov. ${v.governor})`).join("\n") || "§8No daughters yet.";
+  const form = new ActionFormData()
+    .title("🏘️ Satellites")
+    .body(`${list}\n\n§7Charter (Town+, ₹${CHARTER_COST}, 5 souls + governor): loyal daughters tithe coin & grain every 5th dawn.`)
+    .button(`📜 Grant a charter (₹${CHARTER_COST})`)
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 1) return openVentures(player);
+  if (!writ(player, state, "spend")) return openSatellites(player);
+  const m = new ModalFormData().title("Charter").textField("Village name", "Newfield");
+  const r = await m.show(player);
+  if (r.canceled) return openSatellites(player);
+  const name = String(r.formValues[0] ?? "Newfield");
+  return pickCitizen(player, "Governor", `Who governs ${name}?`, (s, id) => charterVillage(s, name, id), openSatellites);
+}
+
+async function openExpeditions(player) {
+  const state = getState();
+  const out = (state.expeditions ?? []).filter((e) => e.status === "out")
+    .map((e) => `§7${e.id} ${EXPEDITIONS[e.kind].icon} ${EXPEDITIONS[e.kind].name}, home day ${e.returnDay}`).join("\n") || "§8None afield.";
+  const form = new ActionFormData()
+    .title("🧭 Expeditions")
+    .body(`${out}\n\n§7Ruins, seams, caves, furs, beasts — the writ runs far.`)
+    .button("🧭 Launch expedition")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 1) return openVentures(player);
+  if (!writ(player, state, "spend")) return openExpeditions(player);
+  const kinds = Object.keys(EXPEDITIONS);
+  const m = new ModalFormData().title("Launch").dropdown("Venture", kinds.map((k) => `${EXPEDITIONS[k].icon} ${EXPEDITIONS[k].name} — ₹${EXPEDITIONS[k].cost}, ${EXPEDITIONS[k].crew} souls, ${EXPEDITIONS[k].days}d`), 0);
+  const r = await m.show(player);
+  if (r.canceled) return openExpeditions(player);
+  const kind = kinds[Number(r.formValues[0])];
+  return pickCitizen(player, "Leader", `Who leads the ${EXPEDITIONS[kind].name}?`, (s, leaderId) => {
+    const pool = s.citizens.filter((c) => c.alive && c.ageStage === "adult" && c.id !== leaderId && c.role !== "minister" && c.status !== "prisoner" && !c.fugitive && c.status !== "away");
+    const crew = pool.slice(0, EXPEDITIONS[kind].crew - 1).map((c) => c.id);
+    return launchExpedition(s, kind, leaderId, crew);
+  }, openExpeditions);
+}
+
+/* ---------------- Industry & Workforce (M13) ---------------- */
+
+async function openIndustry(player) {
+  const state = getState();
+  const t = state.tools ?? { stock: {} };
+  const stock = ["wood", "stone", "iron", "diamond"].map((k) => `§7${k} §f${t.stock?.[k] ?? 0}`).join(" · ");
+  const wf = state.workforce ?? {};
+  const pct = workloadPct(state);
+  const short = handsShort(state);
+  const form = new ActionFormData()
+    .title("🏭 Industry & Workforce")
+    .body(
+      `§7⚒️ Edges: ${stock}\n§7📦 forge queue §f${(t.queue ?? []).length} §7· policy §f${t.policy}\n` +
+      `§7🙋 workload §f${pct}% ${short > 0 ? `§c(${short} short)` : "§a(covered)"} §7· auto-hire ${wf.autoHire ? `§aON (₹${wf.budget}/d)` : "§8off"}`
+    )
+    .button("⚒️ Order tools")
+    .button(`🏭 Smiths: ${t.policy === "crown" ? "FREELANCERS BUY OWN" : "CROWN ISSUES FREE"}`)
+    .button(`${wf.autoHire ? "🙋 Auto-hire OFF" : "🙋 Auto-hire ON"}`)
+    .button("💰 Auto-hire budget")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 4) return openMainMenu(player);
+  if (!writ(player, state, "spend")) return openIndustry(player);
+  if (res.selection === 0) {
+    const tiers = ["wood", "stone", "iron", "diamond"];
+    const m = new ModalFormData().title("Order tools").dropdown("Tier", tiers.map((k) => `${k} — ${Object.entries(TIER_COST[k]).map(([i, n]) => `${n} ${i.replace("minecraft:", "")}`).join(", ")}`), 1);
+    m.slider("Quantity", 1, 10, 1, 2);
+    const r = await m.show(player);
+    if (!r.canceled) {
+      orderTools(state, tiers[Number(r.formValues[0])], Number(r.formValues[1]));
+      saveState();
+      player.sendMessage("§7⚒️ The smiths chalk the order.");
+    }
+    return openIndustry(player);
+  }
+  if (res.selection === 1) {
+    state.tools.policy = t.policy === "crown" ? "self" : "crown";
+    saveState();
+    player.sendMessage(`§7⚒️ Tool policy: ${state.tools.policy === "crown" ? "Crown issues free." : "Freelancers buy their own."}`);
+    return openIndustry(player);
+  }
+  if (res.selection === 2) {
+    state.workforce.autoHire = !wf.autoHire;
+    saveState();
+    player.sendMessage(state.workforce.autoHire ? "§a🙋 The Minister may hire within budget." : "§7🙋 Hiring needs the King's word.");
+    return openIndustry(player);
+  }
+  const m = new ModalFormData().title("Budget").slider("₹/day the Minister may spend", 0, 200, 5, wf.budget ?? 50);
+  const r = await m.show(player);
+  if (!r.canceled) {
+    state.workforce.budget = Number(r.formValues[0]);
+    saveState();
+  }
+  return openIndustry(player);
+}
+
+/* ---------------- Garrison & Shadows (M13) ---------------- */
+
+async function openGarrison(player) {
+  const state = getState();
+  const agents = (state.spies?.agents ?? []).map((a) => `§7🕵️ ${a.name} (since D${a.day})`).join("\n") || "§8No masks abroad.";
+  const intel = (state.spies?.intel ?? []).slice(-3).map((i) => `§9✉️ D${i.day}: ${i.text}`).join("\n") || "§8No dispatches.";
+  const form = new ActionFormData()
+    .title("🛡️ Garrison & Shadows")
+    .body(
+      `§7🔫 muskets §f${state.armory?.muskets ?? 0} §7(issued guards §f${effectiveGuards(state)}§7)\n` +
+      `§7🌙 curfew ${state.curfew?.on ? "§aRINGING" : "§8silent"} §7· 🕵️ counter-spies §f${state.spies?.counterSpies ?? 0}\n\n${agents}\n${intel}`
+    )
+    .button(`🔫 Forge musket (2 iron + 1 log)`)
+    .button(`🔫 Buy muskets (₹${MUSKET_COST} each)`)
+    .button(`🕵️ Plant agent (₹${AGENT_COST})`)
+    .button(`🛡️ Hire counter-spy (₹${COUNTER_COST})`)
+    .button(`${state.curfew?.on ? "🌙 Lift curfew" : "🌙 Ring curfew"}`)
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 5) return openMainMenu(player);
+  if (!writ(player, state, "military")) return openGarrison(player);
+  if (res.selection === 0) {
+    const out = forgeMusket(state);
+    saveState();
+    player.sendMessage(out.ok ? "§a🔫 A musket joins the racks." : `§c${out.reason}`);
+    return openGarrison(player);
+  }
+  if (res.selection === 1) {
+    const m = new ModalFormData().title("Buy muskets").slider("Muskets", 1, 20, 1, 4);
+    const r = await m.show(player);
+    if (!r.canceled) {
+      const out = buyMuskets(state, Number(r.formValues[0]));
+      saveState();
+      player.sendMessage(out.ok ? `§a🔫 ${Number(r.formValues[0])} muskets racked (₹${out.cost}).` : `§c${out.reason}`);
+    }
+    return openGarrison(player);
+  }
+  if (res.selection === 2) {
+    const out = plantAgent(state);
+    saveState();
+    player.sendMessage(out.ok ? `§a🕵️ ${out.agent.name} vanishes abroad with a new face.` : `§c${out.reason}`);
+    return openGarrison(player);
+  }
+  if (res.selection === 3) {
+    const out = hireCounterSpy(state);
+    saveState();
+    player.sendMessage(out.ok ? "§a🛡️ Another lamp lit against the dark." : `§c${out.reason}`);
+    return openGarrison(player);
+  }
+  state.curfew.on = !state.curfew.on;
+  saveState();
+  player.sendMessage(state.curfew.on ? "§6🌙 The curfew bell rings — doors barred, lamps lit." : "§7🌙 The bell falls silent; the night breathes.");
+  return openGarrison(player);
 }
 
 /* ---------------- helpers ---------------- */

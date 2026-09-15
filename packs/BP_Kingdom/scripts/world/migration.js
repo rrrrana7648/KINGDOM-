@@ -79,7 +79,14 @@ export function pullFactor(state) {
     (s, h) => s + Math.max(0, h.beds - h.residents.length), 0
   );
   if ((state.houses ?? []).length > 0 && bedsFree <= 0) pull -= 0.15;
+  pull += prestigePull(state); // M13: fame draws feet
   return Math.max(0.15, Math.min(1, pull));
+}
+
+/** Prestige tiers lift the colony's pull (Camp +0 → Dominion +0.2). */
+function prestigePull(state) {
+  const tier = state.prestige?.tier ?? "Camp";
+  return { Camp: 0, Hamlet: 0.05, Town: 0.1, City: 0.15, Dominion: 0.2 }[tier] ?? 0;
 }
 
 const MIGRANT_JOBS = ["laborer", "woodcutter", "farmer", "builder", "laborer", "farmer"];

@@ -9,10 +9,10 @@ cd tools/sim
 node --no-warnings --loader ./loader.mjs run-sim.mjs
 ```
 
-Exits non-zero if any assertion fails. Covered through M12:
+Exits non-zero if any assertion fails. Covered through M13:
 
 - clock mapping (20-minute vanilla day → colony hours)
-- v1 → v12 save migration, sharding and save sanitization
+- v1 → v13 save migration, sharding and save sanitization
 - founding party composition and wages
 - a full simulated day: woodcutting with replant, crop harvest/replant, quarrying,
   meals at every phase, curfew sleep, end-of-day delivery (virtual + physical chest)
@@ -28,6 +28,7 @@ Exits non-zero if any assertion fails. Covered through M12:
 - M10: season/year turns, weather, yields, festival, sickness/doctors/famine, research completion, fate expiry/fire/decisions
 - M11: crown claim, commissions, writ gating, abdication
 - M12: chat orders incl. gated writs, toggles, decisions
+- M13: prestige, honors, calendar, literacy, hearth, census, caravans, bonds, contracts, insurance, pawn, auction, tools, workforce, desks, satellites, expeditions, spies, curfew, armory, new rulings & writs
 
 The mock implements only the surface the scripts use; UI forms auto-cancel (menus are
 verified manually per `docs/TESTING_M*.md`).

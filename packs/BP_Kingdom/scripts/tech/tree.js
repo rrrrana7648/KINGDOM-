@@ -55,6 +55,8 @@ export function dailyRP(state) {
   let rp = 0;
   for (const b of state.buildings ?? []) {
     if (b.buildingId === "school") rp += 2 * (b.level ?? 1);
+    else if (b.buildingId === "library") rp += 1 * (b.level ?? 1); // M13
+    else if (b.buildingId === "university") rp += 3; // M13
   }
   const teachers = state.citizens.filter(
     (c) => c.alive && c.profession === "teacher" && c.mode === "living"

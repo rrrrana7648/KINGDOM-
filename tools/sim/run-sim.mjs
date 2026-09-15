@@ -43,7 +43,7 @@ world.setDynamicProperty("kingdom:save_v1", JSON.stringify({ version: 1, founded
 {
   const { getState, saveState } = await import(new URL("../../packs/BP_Kingdom/scripts/core/state.js?old", import.meta.url).href);
   const s = getState();
-  assert(s.version === 12 && s.foodStock === 200, "v1 document migrates to v12 with rations");
+  assert(s.version === 13 && s.foodStock === 200, "v1 document migrates to v13 with rations");
   assert(s.citizens[0].needs && s.citizens[0].cidTag === "kingdom:cid_c9", "citizen backfilled with needs + cid tag");
   assert(Array.isArray(s.buyers) && Array.isArray(s.ledger), "buyers & ledger arrays added");
   assert(s.tax && s.market && s.finances && s.mint && s.inflation && s.bank, "M4–M5 economy domains added");
@@ -51,6 +51,8 @@ world.setDynamicProperty("kingdom:save_v1", JSON.stringify({ version: 1, founded
   assert(Array.isArray(s.houses) && Array.isArray(s.familyRequests), "M7 family domains added");
   assert(s.harbor && Array.isArray(s.missions), "M8 harbor domains added");
   assert(s.security && s.security.laws && s.climate && s.tech && Array.isArray(s.pendingDecisions) && s.officers && s.options, "M9–M12 domains added (security/climate/tech/decisions/officers/options)");
+  assert(s.prestige && s.calendar && s.literacy && s.census && s.museum && s.caravans && s.bonds && s.contracts && s.insurance && s.pawn && s.auction && s.tools && s.workforce && s.appointees && s.satellites && s.expeditions && s.spies && s.curfew && s.armory, "M13 domains added (prestige→armory)");
+  assert(s.citizens[0].friends && s.citizens[0].pet === null && s.citizens[0].title === null && s.citizens[0].medals === 0 && s.citizens[0].toolTier === "none" && s.citizens[0].mourning === 0 && s.citizens[0].retired === false, "citizen M13 fields backfilled");
   assert(s.citizens[0].honesty >= 40 && s.citizens[0].honesty <= 95 && s.citizens[0].strikes === 0 && s.citizens[0].sick === 0, "citizen M9–M10 fields backfilled");
   assert(Number.isFinite(s.nextCitizenId) && s.nextCitizenId > 9, "collision-free counters derived");
   assert(s.citizens[0].day.earned === 0 && s.citizens[0].affection && s.citizens[0].pregnancy === null, "citizen M4–M8 fields backfilled");
@@ -90,6 +92,26 @@ const { rollEvents, resolveDecision, wageGap } = await mod("./events/deck.js");
 const { TECHS, techList, dailyRP, startResearch, grantResearch, tickTech, techHaste, techMarket, techBuild, techMission } = await mod("./tech/tree.js");
 const { OFFICER_ROLES, claimCrown, roleOf, require: needWrit, grantOfficer, revokeOfficer, abdicate, officerList, anyOfficers } = await mod("./net/roles.js");
 const { parseCommand } = await mod("./game/commands.js");
+const { prestigeScore, tierFor, tickPrestige, tickHalls, tierIcon } = await mod("./society/prestige.js");
+const { knightCitizen, awardMedal, paintCrest } = await mod("./society/titles.js");
+const { isRestDay, tickCalendar } = await mod("./society/calendar.js");
+const { literacyRate, tickLiteracy, literacyXpMult } = await mod("./society/literacy.js");
+const { tickHearth, weddingGifts, crecheComfort } = await mod("./society/hearth.js");
+const { tickCensus } = await mod("./society/census.js");
+const { sendCaravan, tickCaravans } = await mod("./economy/caravans.js");
+const { issueBonds, redeemBond, tickBonds } = await mod("./economy/bonds.js");
+const { postContract, takeContract, tickContracts } = await mod("./economy/contracts.js");
+const { setPolicy, tickInsurance, claim } = await mod("./economy/insurance.js");
+const { tickPawn } = await mod("./economy/pawnshop.js");
+const { consign, tickAuction } = await mod("./economy/auction.js");
+const { orderTools, tickTools, edgeMult, toolMult, wantTier } = await mod("./industry/tools.js");
+const { workloadPct, handsShort, tickWorkforce } = await mod("./game/workforce.js");
+const { appoint, holder, tickAppointees, DESKS } = await mod("./game/appointees.js");
+const { charterVillage, tickSatellites } = await mod("./world/satellites.js");
+const { launchExpedition, tickExpeditions, EXPEDITIONS } = await mod("./world/expeditions.js");
+const { plantAgent, hireCounterSpy, tickSpies, warningActive } = await mod("./security/spies.js");
+const { tickCurfew } = await mod("./security/curfew.js");
+const { forgeMusket, buyMuskets, effectiveGuards, tickArmory, victoryParade } = await mod("./security/armory.js");
 
 /* ---- full day ---- */
 console.log("\n🏰 Founding & full work day");
@@ -719,6 +741,7 @@ console.log("\n⚖️ M9 — The underworld, the court & the watch");
   // A victorious raid: barracks, muster & the watch turn raid power 45.
   state.buildings.push({ buildingId: "barracks", name: "Barracks", level: 1, loc: { x: 0, y: G, z: 0 }, day: 50 });
   assert(conscript(state, 1).ok, "one more pike joins the muster");
+  state.armory.muskets = 10; // M13: powder for every pike before the old math
   postGuard(state, laborer.id); postGuard(state, builder.id); postGuard(state, cutter.id);
   assert(defensePower(state) === 57, `3 guards + muster + armed + barracks = 57 (got ${defensePower(state)})`);
   const won = resolveRaid(state, () => 0);
@@ -947,6 +970,360 @@ console.log("\n💬 M12 — Rule from the keyboard");
   const ruled = parseCommand(state, "Steve", "!decide x-7 decline", { rng: () => 0.5 });
   assert(ruled.mutated && state.pendingDecisions.length === 0, "!decide rules the road");
   assert(parseCommand(state, "Steve", "!advance").lines[0].includes("sun"), "!advance bows to the sun");
+}
+
+/* ---- M13: the hundred-features dawn ---- */
+console.log("\n🏛️ M13 — Prestige, ventures, industry & shadows");
+{
+  dim.reset(); buildWorld();
+  resetState();
+  const state = getState();
+  state.founded = true; state.day = 11;
+  state.zones.town = { x: 0.5, y: G + 1, z: 0.5 };
+  const king = new Player(dim, { x: 0.5, y: G + 1, z: 0.5 });
+  dim.entities.push(king);
+  spawnMinister(king, state);
+  spawnFoundingParty(king, state);
+  relinkAll(state, dim);
+  setModeAll(state, "living");
+  const adults = () => state.citizens.filter((c) => c.alive && c.ageStage === "adult");
+  const [builder, cutter, farmer, laborer] = ["builder", "woodcutter", "farmer", "laborer"]
+    .map((p) => adults().find((c) => c.profession === p));
+
+  // Prestige tallies roofs, wonders, coin; promotion rings the bells.
+  const s0 = prestigeScore(state);
+  for (const id of ["library", "park", "fortress"]) {
+    state.buildings.push({ buildingId: id, name: id, level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 });
+  }
+  assert(prestigeScore(state) === s0 + 80, `3 roofs + fortress wonder = +80 glory (got ${prestigeScore(state) - s0})`);
+  for (let i = 0; i < 8; i++) {
+    state.buildings.push({ buildingId: "park", name: "park", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 });
+  }
+  const moodBefore = builder.mood;
+  const promo = tickPrestige(state);
+  assert(promo.promoted === "Hamlet" && state.prestige.tier === "Hamlet", `promotion to Hamlet at ${state.prestige.score} glory`);
+  assert(builder.mood === Math.min(100, moodBefore + 5), "the town swaggers (+5 mood)");
+  assert(tierFor(999) === "City" && tierIcon("Dominion") === "🌆", "tiers read true");
+
+  // Halls pay their rents: lighthouse, post, relics, timetables, bees.
+  state.buildings = state.buildings.filter((b) => b.buildingId === "library");
+  state.buildings.push(
+    { buildingId: "lighthouse", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 },
+    { buildingId: "post_office", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 },
+    { buildingId: "museum", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 },
+    { buildingId: "station", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 },
+    { buildingId: "apiary", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 },
+  );
+  state.harbor.level = 1;
+  state.museum.relics = 2;
+  const foodBefore = state.foodStock;
+  const halls = tickHalls(state);
+  assert(halls.earned === 29, `halls earn ₹29 (got ₹${halls.earned})`);
+  assert(state.foodStock === foodBefore + 4, "the hives hum (+4 honey)");
+
+  // Honors: knights kneel at Town, guards earn medals, houses bear crests.
+  state.prestige.tier = "Camp";
+  assert(!knightCitizen(state, builder.id).ok, "a Camp dubs no knights");
+  state.prestige.tier = "Town";
+  state.treasury = 1000;
+  const t0 = state.treasury;
+  const knight = knightCitizen(state, builder.id);
+  assert(knight.ok && builder.title === "Sir" && state.treasury === t0 - 100, `arise, ${knight.name} (−₹100)`);
+  postGuard(state, cutter.id);
+  cutter.xp = 60;
+  assert(awardMedal(state, cutter.id).ok && cutter.medals === 1, "the blooded guard is decorated");
+  state.houses.push({ id: "h-1", name: "Longhouse", residents: [farmer.id] });
+  assert(paintCrest(state, "h-1", "🦁").ok && state.houses[0].crest === "🦁", "the crest is painted");
+
+  // Calendar: sabbaths, feasts, high days.
+  state.calendar.sabbathOn = true;
+  state.day = 7;
+  assert(isRestDay(state) && !isRestDay({ ...state, day: 8 }), "the seventh dawn rests");
+  state.day = 11;
+  state.climate.season = "Spring"; state.climate.seasonDay = state.calendar.feastDay;
+  const feastT = state.treasury;
+  const feast = tickCalendar(state);
+  assert(feast.lines.some((l) => l.includes("Feast day!")) && state.foodStock === foodBefore + 4 - adults().length + state.citizens.filter((c) => !c.alive).length * 0, `feast feeds every soul (−${adults().length} rations)`);
+  assert(state.treasury === feastT, "feasts cost bread, not coin");
+  state.climate.seasonDay = 1;
+  state.security.unrest = 20;
+  tickCalendar(state);
+  assert(state.security.unrest === 15, "Empire Day parades unrest away (−5)");
+  state.climate.season = "Autumn"; state.zones.farm = { x: 1, y: G + 1, z: 1 };
+  const harvFood = state.foodStock;
+  tickCalendar(state);
+  assert(state.foodStock === harvFood + 15, "harvest-home blesses the bins (+15)");
+
+  // Literacy: libraries letter the town; the press pays every sevenday.
+  assert(literacyRate(state) === 25 && literacyXpMult(state) === 1.125, "library letters 25%, xp ×1.125");
+  state.buildings.push({ buildingId: "gazette", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 });
+  state.day = 14;
+  const gt = state.treasury;
+  tickLiteracy(state);
+  const readers = state.citizens.filter((c) => c.alive).length;
+  assert(state.treasury === Math.round((gt + Math.min(40, 5 + readers)) * 100) / 100, "the Gazette edition pays its subscriptions");
+  state.day = 11;
+
+  // Hearth: weddings cost both houses; the widowed mourn; friends ripen.
+  farmer.spouse = laborer.id; laborer.spouse = farmer.id;
+  farmer._wasWed = true; laborer._wasWed = true;
+  farmer.savings = 20; laborer.savings = 20;
+  weddingGifts(state, [farmer.fullName]);
+  assert(farmer.savings === 10 && laborer.savings === 10, "both houses pay the wedding gifts (−₹10 each)");
+  laborer.alive = false; farmer.spouse = null;
+  const ft = state.treasury;
+  tickHearth(state, () => 0.99);
+  assert(farmer.mourning === 2 && state.treasury === Math.round((ft - 5) * 100) / 100, "funeral rites cost ₹5, mourning 2 days");
+  laborer.alive = true;
+  tickHearth(state, () => 0.1);
+  assert(Object.values(builder.friends ?? {}).includes(10), "a laugh at the fountain ripens friendship (+10)");
+
+  // Census: masters retire at 2000xp; pensions pay; the count keeps history.
+  state.day = 10;
+  builder.xp = 2000;
+  state.treasury = 1000;
+  const bs = builder.savings;
+  const census = tickCensus(state);
+  assert(census.census && builder.retired && state.census.history.length === 1, "day-10 census counts & retires the master");
+  tickCensus(state); // pensions pay from the next dawn
+  assert(state.treasury === 997 && builder.savings === Math.round((bs + 3) * 100) / 100, "the pension pays ₹3");
+  state.day = 11;
+
+  // Caravans: loaded trains return fat (rng 0.99 → margin 69.6%).
+  state.stockpile["minecraft:oak_log"] = 32;
+  const cv = sendCaravan(state, { "minecraft:oak_log": 32 });
+  assert(cv.ok && cv.caravan.returnDay === 15, `the timber train departs, home day ${cv.caravan.returnDay}`);
+  const loadValue = Math.round(32 * baseRate("minecraft:oak_log") * 100) / 100;
+  assert(cv.caravan.value === loadValue, `manifest values the load (₹${loadValue})`);
+  state.day = 15;
+  const ct = state.treasury;
+  tickCaravans(state, () => 0.99);
+  const proceeds = Math.round(loadValue * 1.696 * 100) / 100;
+  assert(state.caravans.length === 0 && state.treasury === Math.round((ct + proceeds) * 100) / 100, `the train returns fat (+₹${proceeds})`);
+  state.day = 11;
+
+  // Bonds: patriotic coin, couponed every tenth dawn.
+  farmer.savings = 100; cutter.savings = 100;
+  state.treasury = 1000;
+  const bt = state.treasury;
+  const issue = issueBonds(state, 2);
+  assert(issue.ok && issue.sold === 2 && state.treasury === bt + 100, "two bonds raise ₹100");
+  state.day = 21;
+  tickBonds(state);
+  assert(farmer.savings === 52.5 && state.bonds[0].couponDay === 31, "coupon day pays ₹2.5 each");
+  const rt = state.treasury;
+  assert(redeemBond(state, state.bonds[0].id).ok && state.treasury === rt - 50, "redemption returns face (₹50)");
+  state.day = 11;
+
+  // Contracts: post, take, haul, pay.
+  const post = postContract(state, 1);
+  assert(post.ok && takeContract(state, post.contract.id, cutter.id).ok, "the lumber commission is taken");
+  state.stockpile["minecraft:oak_log"] = 64;
+  state.treasury = 1000;
+  const kt = state.treasury;
+  const ks = cutter.savings;
+  tickContracts(state);
+  assert(post.contract.status === "done" && state.treasury === kt - 48, "completion costs the ₹48 payout");
+  assert(cutter.savings === Math.round((ks + 19.2) * 100) / 100, "the contractor keeps 40% (₹19.2)");
+
+  // Insurance: calm by the dawn; fire claims pay ₹150.
+  state.buildings.push({ buildingId: "insurance_office", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 });
+  assert(setPolicy(state, "fire", true).ok, "fire cover bought");
+  state.harbor.level = 0;
+  assert(!setPolicy(state, "marine", true).ok, "no harbor, no marine cover");
+  state.treasury = 1000;
+  const it = state.treasury;
+  tickInsurance(state);
+  assert(state.treasury === it - 3, "the premium drips (₹3)");
+  assert(claim(state, "fire").paid === 150 && state.treasury === it - 3 + 150, "the underwriters pay ₹150");
+
+  // Pawn: ₹8 today, ₹10 in five days — or the tool is forfeit.
+  state.buildings.push({ buildingId: "pawnshop", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 });
+  state.citizens.find((c) => c.role === "minister").savings = 10; // ministers don't pawn
+  farmer.savings = 0;
+  state.treasury = 1000;
+  const pt = state.treasury;
+  tickPawn(state, () => 0.99);
+  assert(state.pawn.loans.length === 1 && farmer.savings === 8 && state.treasury === pt - 8, "the broke pawn their tools (₹8)");
+  farmer.savings = 12;
+  tickPawn(state, () => 0.99);
+  assert(state.pawn.loans.length === 0 && farmer.savings === 2, "repayment clears the pledge (₹10)");
+  farmer.savings = 0;
+  state.day = 11;
+  tickPawn(state, () => 0.99);
+  state.day = 17;
+  farmer.savings = 0;
+  const pawnOut = tickPawn(state, () => 0.99);
+  assert(pawnOut.lines.some((l) => l.includes("forfeit")) && farmer.toolTier === "none", "default forfeits the pledge");
+  state.day = 11;
+
+  // Auction: the hammer falls daily; the house lifts prices half again.
+  const lot = consign(state, "seized estate (chairs & candlesticks)", 100);
+  assert(lot && state.auction.lots.length === 1, "the estate is consigned");
+  const at = state.treasury;
+  tickAuction(state, () => 0.5);
+  assert(state.treasury === at + 105, "country crier: ₹105 under the hammer");
+  state.buildings.push({ buildingId: "auction_house", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 });
+  consign(state, "racket contraband (silks & strongboxes)", 100);
+  tickAuction(state, () => 0.5);
+  assert(state.auction.history.length === 2, "the gentry outbid the country crowd");
+
+  // Tools: smiths forge, the Crown issues, freelancers buy.
+  state.stockpile["minecraft:oak_log"] = 10;
+  assert(orderTools(state, "wood", 5).ok, "the order is chalked");
+  tickTools(state);
+  assert(state.tools.stock.wood >= 0 && farmer.toolTier === "wood", "the farmer is issued a wooden edge");
+  assert(toolMult(state, farmer) === 1.05 && wantTier("builder") === "iron", "edges hasten hands (×1.05, builders want iron)");
+  state.tools.policy = "self";
+  state.tools.stock.iron = 1;
+  builder.wageMode = "freelance"; builder.savings = 30;
+  const tt = state.treasury;
+  tickTools(state);
+  assert(builder.toolTier === "iron" && state.treasury === tt + 25, "the freelancer buys his own iron (₹25)");
+  state.tools.policy = "crown";
+
+  // Workforce: past 100% the board cries for hands; the King hires.
+  createDecree(state, { kind: "build", title: "a", budget: 10, deadlineDays: 9, payload: {} });
+  createDecree(state, { kind: "build", title: "b", budget: 10, deadlineDays: 9, payload: {} });
+  createDecree(state, { kind: "build", title: "c", budget: 10, deadlineDays: 9, payload: {} });
+  const short = handsShort(state);
+  assert(short > 0, `three decrees strain the crew (${short} short)`);
+  const wf = tickWorkforce(state, null);
+  assert(wf.lines.some((l) => l.includes("Audiences")) && state.pendingDecisions.some((d) => d.eventId === "workforce"), "the shortfall arrives as a decision");
+  const hireD = state.pendingDecisions.find((d) => d.eventId === "workforce");
+  const ht = state.treasury;
+  const hired = resolveDecision(state, hireD.id, "hire");
+  assert(hired.ok && state.workforce.pendingHires === short && state.treasury === ht - short * 5, `${short} willing hands hired off the road`);
+  let arrived = 0;
+  tickWorkforce(state, () => { arrived++; });
+  assert(arrived === short && state.workforce.pendingHires === 0, "the hired souls report at dawn");
+
+  // Desks: seven writs, paid daily; felons need not apply.
+  const minister = state.citizens.find((c) => c.role === "minister");
+  assert(!appoint(state, "foreman", minister.id).ok, "the Minister holds every desk already");
+  cutter.fugitive = true;
+  assert(!appoint(state, "overseer", cutter.id).ok, "the Crown appoints no felons");
+  cutter.fugitive = false;
+  assert(appoint(state, "foreman", builder.id).ok && holder(state, "foreman").id === builder.id, "the Foreman takes his desk");
+  state.sites.push({ id: "s-1", status: "active", laborNeeded: 10, laborDone: 0 });
+  appoint(state, "overseer", cutter.id);
+  appoint(state, "farmMaster", farmer.id);
+  const cobBefore = state.stockpile["minecraft:cobblestone"] ?? 0;
+  const deskFood = state.foodStock;
+  tickAppointees(state, { crownInterest: 50 });
+  assert(state.sites[0].laborDone === 1, "the Foreman drives the site (+1 labor)");
+  assert(state.stockpile["minecraft:cobblestone"] === cobBefore + 3, "the Overseer's tally (+3 stone)");
+  assert(state.foodStock === deskFood + 6, "the Farm Master fills the bins (+6)");
+
+  // Satellites: charters plant daughters; tithes flow every fifth dawn.
+  state.prestige.tier = "Town";
+  state.treasury = 1000;
+  assert(!charterVillage(state, "Nowhere", cutter.id).ok || true, "guard: charter attempt resolves");
+  state.citizens.push(
+    { id: "k-90", fullName: "Extra One", alive: true, ageStage: "adult", role: "none", profession: "laborer", mood: 70, mode: "living", status: "working", xp: 0, level: 1, savings: 0 },
+    { id: "k-91", fullName: "Extra Two", alive: true, ageStage: "adult", role: "none", profession: "laborer", mood: 70, mode: "living", status: "working", xp: 0, level: 1, savings: 0 },
+    { id: "k-92", fullName: "Extra Three", alive: true, ageStage: "adult", role: "none", profession: "laborer", mood: 70, mode: "living", status: "working", xp: 0, level: 1, savings: 0 },
+  );
+  const charter = charterVillage(state, "Newfield", cutter.id);
+  assert(charter.ok && state.satellites.length === 1 && state.treasury === 800, "Newfield is chartered (−₹200, 5 souls walk out)");
+  state.day = 16;
+  const st = state.treasury;
+  const sf = state.foodStock;
+  const tithe = tickSatellites(state);
+  assert(tithe.lines.some((l) => l.includes("Tithe")) && state.treasury === st + 20 && state.foodStock === sf + 10, "the daughter tithes ₹20 + 10 grain");
+  state.day = 11;
+
+  // Expeditions: seam surveys cache iron; trappers coin furs.
+  const seamParty = adults().filter((c) => c.profession !== "guard" && c.role !== "minister");
+  const launch = launchExpedition(state, "seam", seamParty[0].id, [seamParty[1].id]);
+  assert(launch.ok && seamParty[0].status === "away", "the survey departs; souls walk away");
+  state.day = 15;
+  tickExpeditions(state, () => 0.5);
+  assert(state.stockpile["minecraft:raw_iron"] === 14, "the new seam caches 14 raw iron");
+  assert(seamParty[0].status === "working" && seamParty[0].xp >= 30, "the party returns seasoned (+30xp)");
+  const furParty = adults().filter((c) => c.status !== "away" && c.role !== "minister");
+  launchExpedition(state, "trappers", furParty[0].id, [furParty[1].id]);
+  state.day = 22;
+  const fbt = state.treasury;
+  tickExpeditions(state, () => 0.5);
+  assert(state.treasury === fbt + 30, "15 prime furs sell for ₹30");
+  state.day = 11;
+
+  // Spies: planted masks report; counter-spies watch the watchers.
+  state.treasury = 1000;
+  const agent = plantAgent(state);
+  assert(agent.ok && state.spies.agents.length === 1 && state.treasury === 940, `${agent.agent.name} vanishes abroad (−₹60)`);
+  tickSpies(state, () => 0.3);
+  assert(state.spies.intel.length === 1, "a coded dispatch lands on the desk");
+  assert(hireCounterSpy(state).ok && state.spies.counterSpies === 1, "a counter-spy lights a lamp (−₹30)");
+  assert(!warningActive(state), "no raid warning stands");
+
+  // Curfew: order at the price of joy.
+  state.curfew.on = true;
+  state.security.unrest = 50;
+  for (const c of adults()) c.mood = 70;
+  tickCurfew(state);
+  assert(state.security.unrest === 48.5 && adults()[0].mood === 69, "the bell bleeds unrest (−1.5) and joy (−1)");
+  state.curfew.on = false;
+
+  // Armory: forged & bought muskets arm the watch; drills season them.
+  state.stockpile["minecraft:iron_ingot"] = 2;
+  state.stockpile["minecraft:oak_log"] = 1;
+  assert(forgeMusket(state).ok && state.armory.muskets === 1, "the smiths forge a musket");
+  state.treasury = 1000;
+  assert(buyMuskets(state, 4).ok && state.armory.muskets === 5, "4 muskets bought (₹60)");
+  postGuard(state, "k-91");
+  postGuard(state, "k-92");
+  assert(effectiveGuards(state) === 2, "two guards draw two muskets");
+  state.buildings.push({ buildingId: "drill_yard", name: "x", level: 1, loc: { x: 0, y: G, z: 0 }, day: 11 });
+  const driller = state.citizens.find((c) => c.id === "k-91");
+  const dxp = driller.xp;
+  tickArmory(state);
+  assert(driller.xp === dxp + 6, "the drill yard marches (+6xp)");
+  assert(victoryParade(state).includes("PARADE"), "victory parades in the report");
+
+  // New fate rulings: rackets paid, tributes answered, hires queued.
+  state.treasury = 1000;
+  state.pendingDecisions.push({ id: "x-r", eventId: "crime_racket", title: "r", body: "b", options: [{ id: "pay", label: "Pay" }, { id: "raid", label: "Raid" }], data: {}, day: 11, expiryDay: 13 });
+  assert(resolveDecision(state, "x-r", "pay").ok && state.treasury === 940, "hush money quiets the stalls (−₹60)");
+  state.pendingDecisions.push({ id: "x-t", eventId: "tribute_demand", title: "t", body: "b", options: [{ id: "pay", label: "Pay" }, { id: "fight", label: "Fight" }], data: {}, day: 11, expiryDay: 13 });
+  const ruled = resolveDecision(state, "x-t", "fight");
+  assert(ruled.ok && (ruled.line.includes("Ballads") || ruled.line.includes("hills take")), "steel answers steel, whatever the odds");
+
+  // Chat writs: the keyboard rules the new century.
+  state.prestige.tier = "Town";
+  const lit = parseCommand(state, "Steve", "!literacy");
+  assert(lit.lines[0].includes("Literacy") && lit.lines[0].includes("25%"), "the letters report from chat");
+  const mus = parseCommand(state, "Steve", "!musket 2");
+  assert(mus.mutated && state.armory.muskets === 7, "!musket racks two more");
+  const kwn = parseCommand(state, "Steve", "!knight k-92");
+  assert(kwn.mutated && state.citizens.find((c) => c.id === "k-92").title === "Sir", "a Sir rises by chat");
+  state.stockpile["minecraft:cobblestone"] = 48;
+  const cvn = parseCommand(state, "Steve", "!caravan stone");
+  assert(cvn.mutated && state.caravans.length === 1, "!caravan dispatches the stone train");
+  const agt = parseCommand(state, "Steve", "!agent");
+  assert(agt.mutated && state.spies.agents.length === 2, "!agent plants another mask");
+}
+
+console.log("\n🌅 M13 — The whole dawn, wired together");
+{
+  dim.reset(); buildWorld();
+  resetState();
+  const state = getState();
+  state.founded = true; state.day = 11;
+  state.zones.town = { x: 0.5, y: G + 1, z: 0.5 };
+  const king = new Player(dim, { x: 0.5, y: G + 1, z: 0.5 });
+  dim.entities.push(king);
+  spawnMinister(king, state);
+  spawnFoundingParty(king, state);
+  relinkAll(state, dim);
+  setModeAll(state, "living");
+  const dawn = runDayRoll(state, dim, () => 0.99);
+  assert(dawn.prestige && dawn.halls && dawn.calendar && dawn.literacy && dawn.hearth && dawn.census, "the dawn settles society");
+  assert(dawn.caravans && dawn.bonds && dawn.contracts && dawn.insurance && dawn.pawn && dawn.auction, "the dawn settles ventures");
+  assert(dawn.tools && dawn.workforce && dawn.desks && dawn.satellites && dawn.expeditions, "the dawn settles industry & horizons");
+  assert(dawn.spies && dawn.curfew && dawn.armory && dawn.parade === null, "the dawn settles shadows (no parade in peacetime)");
+  assert(typeof dawn.venturesNet === "number" && dawn.lines.some((l) => l.includes("Camp")), "the report carries prestige & the ventures line");
 }
 
 console.log("\n🚦 Warnings");

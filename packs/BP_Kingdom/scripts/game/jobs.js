@@ -15,6 +15,8 @@ import { sellLoad, buyerForCommodity } from "../economy/buyers.js";
 import { categoryOf } from "../economy/pricebook.js";
 import { techHaste } from "../tech/tree.js";
 import { farmYield, stormBound } from "../events/seasons.js";
+import { toolMult } from "../industry/tools.js";
+import { literacyXpMult } from "../society/literacy.js";
 
 const ZONE_FOR_JOB = {
   woodcutter: "forest",
@@ -157,7 +159,7 @@ export function performWork(record, state, tick) {
   }
   face(entity, t);
   mem.workCalls++;
-  const speed = (SKILL_MULT[record.level] ?? 1) * buildingHaste(record, state) * techHaste(state, record.profession);
+  const speed = (SKILL_MULT[record.level] ?? 1) * buildingHaste(record, state) * techHaste(state, record.profession) * toolMult(state, record);
   const requiredCalls = Math.max(1, Math.round((t.calls ?? 4) / speed));
 
   if (mem.workCalls % 2 === 0) {
@@ -209,7 +211,7 @@ export function deliver(record, state, memArg) {
   }
   // Rejected goods (quota/float full) stay in the carry for tomorrow's trip.
   mem.carry = { ...result.rejected };
-  grantXp(record, entity, xp);
+  grantXp(record, entity, Math.round(xp * literacyXpMult(state)));
   return { ok: true, status: "delivered", result };
 }
 
@@ -236,7 +238,7 @@ function patrolDuty(record, state, tick, entity) {
   if (walk === "arrived") mem.lantern++;
   record.day.workedTicks += 5;
   mem.workCalls = (mem.workCalls ?? 0) + 1;
-  if (mem.workCalls % 40 === 0) grantXp(record, entity, 4); // drill compounds
+  if (mem.workCalls % 40 === 0) grantXp(record, entity, Math.max(1, Math.round(4 * literacyXpMult(state)))); // drill compounds
   return { ok: true, status: "patrolling" };
 }
 

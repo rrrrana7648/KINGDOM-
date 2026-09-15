@@ -42,10 +42,19 @@ export function securityRating(state) {
 
 /** Defense power thrown against a raid. */
 export function defensePower(state) {
-  const guards = guardRoster(state).length;
+  // M13: only musket-issued guards count; fortresses & armories fortify;
+  // a standing spy warning doubles the garrison's readiness (×1.5).
+  const guards = Math.min(guardRoster(state).length, state.armory?.muskets ?? 0);
   const barracks = (state.buildings ?? []).find((b) => b.buildingId === "barracks");
+  const fortress = (state.buildings ?? []).find((b) => b.buildingId === "fortress");
+  const armoryHall = (state.buildings ?? []).some((b) => b.buildingId === "armory");
   const armed = state.citizens.filter((c) => c.alive && c.ageStage === "adult" && c.armed).length;
-  return guards * 10 + militiaCount(state) * 6 + (barracks ? 15 * (barracks.level ?? 1) : 0) + armed * 2;
+  let power = guards * 10 + militiaCount(state) * 6 +
+    (barracks ? 15 * (barracks.level ?? 1) : 0) +
+    (fortress ? 20 * (fortress.level ?? 1) : 0) +
+    (armoryHall ? 5 : 0) + armed * 2;
+  if (state.day <= (state.spies?.raidWarningDay ?? -99)) power = Math.round(power * 1.5);
+  return power;
 }
 
 function ledgerWar(state, what, detail) {

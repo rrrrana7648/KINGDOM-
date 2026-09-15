@@ -100,7 +100,8 @@ export function farmYield(state) {
   const cl = state.climate;
   const irrigated = (state.tech?.unlocked ?? []).includes("irrigation");
   let mult = 1;
-  if (cl.weather === "rain") mult += cl.season === "Summer" && cl.flood >= 3 ? -0.5 : 0.2;
+  const almanac = (state.buildings ?? []).some((b) => b.buildingId === "observatory");
+  if (cl.weather === "rain") mult += cl.season === "Summer" && cl.flood >= 3 ? (almanac ? -0.25 : -0.5) : 0.2;
   if (cl.weather === "heatwave") mult -= irrigated ? 0.2 : 0.4;
   if (cl.droughtDays >= 4) mult -= irrigated ? 0.15 : 0.35;
   if (cl.weather === "frost") mult -= 0.25;

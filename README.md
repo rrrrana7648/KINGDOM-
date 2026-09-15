@@ -8,7 +8,7 @@ Rule a living Victorian-era colony inside Minecraft **Bedrock** (mobile): you ar
 - 🧩 Language: **JavaScript (Script API 2.1.0)** + JSON — Bedrock cannot run Java/Forge mods
 - 📦 Shipped as one `.mcaddon` (Behavior Pack + Resource Pack)
 
-## ▶️ Play the current build (Milestones M1–M12)
+## ▶️ Play the current build (Milestones M1–M13)
 
 - **M1:** `/kingdom:start` founding flow, Sir Edmund Hale (Minister), 2-men + 2-women founding party, Royal Scepter menu, live action-bar colony clock (vanilla 20-minute day), sidebar HUD, population policy, suggested wages, world-saved state.
 - **M2:** citizens follow the King or live the daily schedule (breakfast · two shifts · lunch · deliveries · dinner · leisure · curfew sleep), need bars and mood, woodcutter/farmer/quarry labor with replanting and XP levels, follow/armed/profession orders, work-site marking, stockpile chest delivery, monster flight, daily wage roll, death handling, relog-safe NPC linking.
@@ -22,6 +22,7 @@ Rule a living Victorian-era colony inside Minecraft **Bedrock** (mobile): you ar
 - **M10:** the turning year (40-day seasons, monsoon/frost/storms shaping farms & scaffolds), **festivals**, rationing & quarantine, sickness/doctors/plague/famine with a **graveyard**, a 16-card **fate deck** with pending royal decisions, and a 7-inquiry **research tree** (irrigation, tools, steam, railway, telegraph, medicine, platecraft).
 - **M11:** co-op rule — first scepter claims the **Crown**, which commissions Chamberlain/Treasurer/Magistrate/Marshal; gated writs bind every menu and the full **`!chat orders`** system (`!help`).
 - **M12:** forged **custom items** (Royal Scepter, gavel, guard badge, royal seal, research scroll), curated sound **stings** with mute, live security + sky HUD, and one-command packaging & validation.
+- **M13:** the hundred-features dawn — **prestige tiers** (Camp → Dominion), knighthoods/medals/crests, **festival calendar** with sabbaths, literacy & the Gazette, hearth vignettes, census & pensions, **caravans, bonds, contracts, insurance, pawn & auction**, tool tiers, auto-hiring, seven **appointed desks**, satellite charters, expeditions, spies, curfew, muskets & drills, and 8 new fate cards — behind four new scepter halls + ten new `!chat` writs.
 
 1. Run `bash tools/package.sh` (or download a release `.mcaddon`).
 2. Copy `dist/KINGDOM.mcaddon` to your Android phone and open it with Minecraft — both packs import.
@@ -42,4 +43,4 @@ tools/package.sh → dist/KINGDOM.mcaddon
 
 ## 🚧 Status
 
-M1–M12 built and regression-tested (`tools/sim`, green, zero warnings). No content from the design's boundary list (forced labor/marriage/explicit content) was implemented.
+M1–M13 built and regression-tested (`tools/sim`, green, zero warnings). No content from the design's boundary list (forced labor/marriage/explicit content) was implemented.

@@ -11,7 +11,8 @@
  * Save versions: 3 = M3 warehouse · 4 = M4 market & taxes · 5 = M5 mint &
  * bank · 6 = M6 decrees & building · 7 = M7 family & housing · 8 = M8 harbor
  * · 9 = M9 law & defense · 10 = M10 climate, health & tech · 11 = M11 co-op
- * officers · 12 = M12 polish & options.
+ * officers · 12 = M12 polish & options · 13 = M13 hundred-features pass
+ * (prestige, society, ventures, industry, garrison, shadows).
  */
 import { world } from "@minecraft/server";
 
@@ -19,7 +20,7 @@ const LEGACY_KEY = "kingdom:save_v1";
 const K_BASE = "kingdom:base";
 const K_CITIZENS = "kingdom:citizens";
 const K_LEDGER = "kingdom:ledger";
-export const SAVE_VERSION = 12;
+export const SAVE_VERSION = 13;
 export const LEDGER_CAP = 150;
 
 /** @returns {object} a fresh kingdom document */
@@ -105,6 +106,33 @@ export function defaultState() {
     officers: {}, // playerName -> {role, grantedDay, by}
     // M12 — player options
     options: { chatOrders: true, stings: true },
+    // M13 — the hundred-features pass
+    prestige: { score: 0, tier: "Camp" },
+    calendar: { sabbathOn: false, sabbathEvery: 7, feastDay: 5, empireDay: true, harvestHome: true, fireworks: true },
+    literacy: { gazette: true },
+    bonds: [], // {id,holderId,principal,day,couponDay,rate}
+    contracts: [], // {id,item,qty,progress,payout,day,expiryDay,status,by}
+    insurance: { office: false, fire: false, marine: false, paidDay: 0 },
+    pawn: { policy: "allow", loans: [] }, // loans: {id,citizenId,principal,day,dueDay}
+    auction: { lots: [], history: [] }, // lots: {id,desc,value,day}
+    tools: { stock: { wood: 0, stone: 0, iron: 0, diamond: 0 }, queue: [], policy: "crown" },
+    workforce: { autoHire: false, budget: 50, pendingHires: 0 },
+    appointees: { foreman: null, overseer: null, farmMaster: null, chiefBuyer: null, warehouseKeeper: null, guardCaptain: null, banker: null },
+    satellites: [], // {id,name,governorId,pop,loyalty,day}
+    expeditions: [], // {id,kind,leaderId,crew,departDay,returnDay,status}
+    spies: { agents: [], intel: [], counterSpies: 0, raidWarningDay: -99 },
+    curfew: { on: false },
+    armory: { muskets: 0 },
+    census: { lastDay: 0, history: [] },
+    museum: { relics: 0 },
+    caravans: [], // {id,goods,value,departDay,returnDay}
+    nextBondId: 1,
+    nextContractId: 1,
+    nextLotId: 1,
+    nextSatelliteId: 1,
+    nextExpeditionId: 1,
+    nextSpyId: 1,
+    nextCaravanId: 1,
   };
 }
 
@@ -329,6 +357,46 @@ function migrate(data) {
     data.options = { chatOrders: true, stings: true, ...(data.options ?? {}) };
     data.version = 12;
   }
+  if (data.version < 13) {
+    // M13: hundred-features domains.
+    data.prestige = data.prestige ?? { score: 0, tier: "Camp" };
+    data.calendar = data.calendar ?? { sabbathOn: false, sabbathEvery: 7, feastDay: 5, empireDay: true, harvestHome: true, fireworks: true };
+    data.literacy = data.literacy ?? { gazette: true };
+    data.bonds = data.bonds ?? [];
+    data.contracts = data.contracts ?? [];
+    data.insurance = data.insurance ?? { office: false, fire: false, marine: false, paidDay: 0 };
+    data.pawn = data.pawn ?? { policy: "allow", loans: [] };
+    data.auction = data.auction ?? { lots: [], history: [] };
+    data.tools = data.tools ?? { stock: { wood: 0, stone: 0, iron: 0, diamond: 0 }, queue: [], policy: "crown" };
+    data.workforce = data.workforce ?? { autoHire: false, budget: 50, pendingHires: 0 };
+    data.workforce.pendingHires = data.workforce.pendingHires ?? 0;
+    data.appointees = data.appointees ?? { foreman: null, overseer: null, farmMaster: null, chiefBuyer: null, warehouseKeeper: null, guardCaptain: null, banker: null };
+    data.satellites = data.satellites ?? [];
+    data.expeditions = data.expeditions ?? [];
+    data.spies = data.spies ?? { agents: [], intel: [], counterSpies: 0, raidWarningDay: -99 };
+    data.curfew = data.curfew ?? { on: false };
+    data.armory = data.armory ?? { muskets: 0 };
+    data.census = data.census ?? { lastDay: 0, history: [] };
+    data.museum = data.museum ?? { relics: 0 };
+    data.caravans = data.caravans ?? [];
+    data.nextBondId = data.nextBondId ?? 1;
+    data.nextContractId = data.nextContractId ?? 1;
+    data.nextLotId = data.nextLotId ?? 1;
+    data.nextSatelliteId = data.nextSatelliteId ?? 1;
+    data.nextExpeditionId = data.nextExpeditionId ?? 1;
+    data.nextSpyId = data.nextSpyId ?? 1;
+    data.nextCaravanId = data.nextCaravanId ?? 1;
+    for (const c of data.citizens ?? []) {
+      c.title = c.title ?? null;
+      c.medals = c.medals ?? 0;
+      c.friends = c.friends ?? {};
+      c.pet = c.pet ?? null;
+      c.toolTier = c.toolTier ?? "none";
+      c.mourning = c.mourning ?? 0;
+      c.retired = c.retired ?? false;
+    }
+    data.version = 13;
+  }
   // Belt & braces: legacy docs sometimes lack counters — derive collision-free
   // values from the live collections so `next*++` never yields NaN.
   data.nextCitizenId = data.nextCitizenId ?? (1 + maxSuffix(data.citizens, "id", "c-"));
@@ -390,6 +458,13 @@ function backfillCitizen(c) {
   c.fugitive = c.fugitive ?? false;
   c.sick = c.sick ?? 0;
   c.quarantined = c.quarantined ?? false;
+  c.title = c.title ?? null;
+  c.medals = c.medals ?? 0;
+  c.friends = c.friends ?? {};
+  c.pet = c.pet ?? null;
+  c.toolTier = c.toolTier ?? "none";
+  c.mourning = c.mourning ?? 0;
+  c.retired = c.retired ?? false;
   c.needs = c.needs ?? { food: 100, rest: 100, leisure: 100, safety: 100 };
   c.day = c.day ?? freshDay();
   c.day.earned = c.day.earned ?? 0;
