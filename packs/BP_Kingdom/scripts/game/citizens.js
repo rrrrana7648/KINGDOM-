@@ -1,10 +1,11 @@
 /**
  * citizens.js — spawns named NPCs and keeps the citizen registry in state.
- * M1 uses vanilla villagers (minecraft:villager_v2) with name tags; the M12
- * art pass replaces them with custom Victorian models.
+ * M1/M2 use vanilla villagers (minecraft:villager_v2) with name tags and a
+ * persistent kingdom:cid_ tag; custom Victorian models arrive at M12.
  */
 import { makeName, MINISTER_NAME } from "../core/names.js";
 import { suggestWage } from "../core/economist.js";
+import { tagForRecord, refreshNameTag } from "./npcRegistry.js";
 
 export const NPC_TYPE = "minecraft:villager_v2";
 
@@ -27,8 +28,9 @@ function spawnSpot(player, index = 0, total = 1, distance = 3) {
 }
 
 function freshRecord(state, entity, { name, sex, role, profession }) {
-  const { wage } = suggestWage(profession, { level: 1 });
-  return {
+  const danger = profession === "miner" ? "cave" : "safe";
+  const { wage } = suggestWage(profession, { level: 1, danger });
+  const record = {
     id: `c-${state.nextCitizenId++}`,
     entityId: entity.id,
     fullName: name,
@@ -42,12 +44,29 @@ function freshRecord(state, entity, { name, sex, role, profession }) {
     wageMode: "crown", // crown | freelance
     wage,
     employer: "crown",
+    mode: "following", // following | living
+    armed: false,
+    alive: true,
+    savings: 0,
     home: null,
     spouse: null,
     mood: role === "minister" ? 90 : 78,
     health: 20,
-    status: "following", // following | working | resting | expedition
+    status: "following",
+    needs: { food: 100, rest: 100, leisure: 100, safety: 100 },
+    day: {
+      meals: 0, slept: false, workedTicks: 0, leisureTicks: 0,
+      delivered: 0, scared: 0, breakfast: false, lunch: false, dinner: false,
+    },
   };
+  record.cidTag = tagForRecord(record);
+  return record;
+}
+
+function outfit(entity, record) {
+  entity.addTag("kingdom:npc");
+  entity.addTag(record.cidTag);
+  refreshNameTag(record, entity);
 }
 
 /** @returns {object} the Minister's citizen record */
@@ -56,16 +75,13 @@ export function spawnMinister(player, state) {
   const entity =
     safeSpawn(dim, spawnSpot(player, 0, 1, 3)) ??
     safeSpawn(dim, player.location);
-  entity.nameTag = `§6§l${MINISTER_NAME}§r   §7· §eMinister`;
-  entity.addTag("kingdom:npc");
-  entity.addTag("kingdom:minister");
-
   const record = freshRecord(state, entity, {
     name: MINISTER_NAME,
     sex: "m",
     role: "minister",
     profession: "minister",
   });
+  outfit(entity, record);
   state.citizens.push(record);
   return record;
 }
@@ -84,17 +100,13 @@ export function spawnFoundingParty(player, state) {
     const entity =
       safeSpawn(dim, spawnSpot(player, i, FOUNDING_SETTLERS.length, 3)) ??
       safeSpawn(dim, player.location);
-    const pretty = spec.profession[0].toUpperCase() + spec.profession.slice(1);
-    entity.nameTag = `§f${name}§r   §7· ${pretty}`;
-    entity.addTag("kingdom:npc");
-    entity.addTag("kingdom:settler");
-
     const record = freshRecord(state, entity, {
       name,
       sex: spec.sex,
       role: "settler",
       profession: spec.profession,
     });
+    outfit(entity, record);
     state.citizens.push(record);
     records.push(record);
   });

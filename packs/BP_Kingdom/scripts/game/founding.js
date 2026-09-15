@@ -51,6 +51,11 @@ export async function startFounding(player) {
   state.ministerGreeted = false;
   state.foundedWorldDay = world.getDay();
   state.day = 1;
+  state.zones.town = {
+    x: Math.floor(player.location.x) + 0.5,
+    y: Math.floor(player.location.y),
+    z: Math.floor(player.location.z) + 0.5,
+  };
 
   const minister = spawnMinister(player, state);
   saveState();
@@ -111,7 +116,10 @@ export async function greetMinister(player) {
     );
   }
   player.sendMessage(
-    `§6[KINGDOM] §aYou received the §6Royal Scepter§a. Long-press/use it to open the Kingdom Menu. The clock above your hotbar shows colony time.`
+    `§6[KINGDOM] §aYou received the §6Royal Scepter§a. Long-press/use it to open the Kingdom Menu.\n` +
+      `§7① §fOrders §7→ release everyone to §olive & work§r §7(or keep them following you)\n` +
+      `§7② §fSites & Stockpile §7→ stand in a grove/farm/quarry and mark each work site\n` +
+      `§7③ A stockpile §fchest §7you look at can be registered as the delivery point.`
   );
 }
 

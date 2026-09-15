@@ -63,20 +63,20 @@ KINGDOM-/
 
 ## 4. Core systems by milestone (mapped to design doc)
 
-| Milestone | Systems | Key files |
-|---|---|---|
-| **M1 (current)** | `/kingdom:start` founding modal, Minister + 2M/2W settlers, scepter menu, clock HUD, day counter, save/load, economist tables | `main`, `state`, `founding`, `citizens`, `hud`, `clock`, `economist` |
-| M2 | needs/schedule AI, skills/XP, follow/life orders, first labor loops (wood/farm/build), homes | `game/needs`, `game/schedule`, `game/jobs/*` |
-| M3 | warehouse chest zones, receiving clerk, licensed buyers, floats, ledgers | `economy/warehouse`, `economy/buyers` |
-| M4 | market sim, tax engine, Day Roll GDP/net profit, reports | `economy/dayroll`, `economy/tax`, `economy/market` |
-| M5 | paper/ink/mint chain, inflation, bank loans & debt | `economy/mint`, `economy/bank` |
-| M6 | decrees + deadlines + managers, blueprint & scepter construction, upgrades | `game/decrees`, `build/construction`, `structures/` |
-| M7 | courtship, marriage requests, 6-day child aging, houses registry, schools | `social/family`, `social/housing` |
-| M8 | recruitment missions, refugee ships, harbor trade events | `world/harbor`, `world/migration` |
-| M9 | crime, courts, inspectors, guards/army, raids | `security/*` |
-| M10 | seasons/weather/disease events, tech tree, railway/telegraph | `events/*`, `tech/tree` |
-| M11 | co-op officer roles & permissions | `net/roles` |
-| M12 | custom art/audio, command-parser polish, Android test & packaging | `RP_Kingdom/*` |
+| Milestone | Systems | Key files | Status |
+|---|---|---|---|
+| M1 | `/kingdom:start` founding modal, Minister + 2M/2W settlers, scepter menu, clock HUD, day counter, save/load, economist tables | `main`, `state`, `founding`, `citizens`, `hud`, `clock`, `economist` | ✅ built |
+| **M2 (current)** | follow/life orders, daily schedule state machine, needs & mood, XP/levels + speed, woodcutter/farmer/quarry labor loops, work-site zones, physical chest delivery, day-roll wages, death handling | `game/schedule`, `game/jobs`, `game/movement`, `game/npcRegistry`, `game/dayroll` (+ sim tests) | ✅ built |
+| M3 | warehouse chest zones, receiving clerk, licensed buyers, floats, ledgers | `economy/warehouse`, `economy/buyers` | ⬜ planned |
+| M4 | market sim, tax engine, Day Roll GDP/net profit, reports | `economy/dayroll`, `economy/tax`, `economy/market` | ⬜ planned |
+| M5 | paper/ink/mint chain, inflation, bank loans & debt | `economy/mint`, `economy/bank` | ⬜ planned |
+| M6 | decrees + deadlines + managers, blueprint & scepter construction, upgrades | `game/decrees`, `build/construction`, `structures/` | ⬜ planned |
+| M7 | courtship, marriage requests, 6-day child aging, houses registry, schools | `social/family`, `social/housing` | ⬜ planned |
+| M8 | recruitment missions, refugee ships, harbor trade events | `world/harbor`, `world/migration` | ⬜ planned |
+| M9 | crime, courts, inspectors, guards/army, raids | `security/*` | ⬜ planned |
+| M10 | seasons/weather/disease events, tech tree, railway/telegraph | `events/*`, `tech/tree` | ⬜ planned |
+| M11 | co-op officer roles & permissions | `net/roles` | ⬜ planned |
+| M12 | custom art/audio, command-parser polish, Android test & packaging | `RP_Kingdom/*` | ⬜ planned |
 
 ## 5. Engine rules we code around
 

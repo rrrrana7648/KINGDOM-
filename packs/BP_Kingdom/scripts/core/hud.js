@@ -25,11 +25,15 @@ function objective() {
   return obj;
 }
 
+function aliveCitizens(state) {
+  return state.citizens.filter((c) => c.alive !== false);
+}
+
 function avgMood(state) {
-  if (!state.citizens.length) return 0;
+  const citizens = aliveCitizens(state);
+  if (!citizens.length) return 0;
   return Math.round(
-    state.citizens.reduce((sum, c) => sum + (c.mood ?? 0), 0) /
-      state.citizens.length
+    citizens.reduce((sum, c) => sum + (c.mood ?? 0), 0) / citizens.length
   );
 }
 
@@ -41,15 +45,16 @@ export function renderHud(state) {
   // Clear previous label keys, then repaint in order.
   for (const p of obj.getParticipants()) obj.removeParticipant(p);
 
-  const adults = state.citizens.filter((c) => c.ageStage === "adult").length;
+  const citizens = aliveCitizens(state);
+  const living = citizens.filter((c) => c.mode === "living").length;
   const lines = [
     `§7${state.colony.name} §7· Day ${state.day}`,
-    `§f👥 Population: §b${state.citizens.length} §7(adults ${adults})`,
+    `§f👥 Pop: §b${citizens.length} §7· ${living} at work`,
     `§6💰 Treasury: §e₹${Math.round(state.treasury)}`,
     `§a📈 Net/day: §7— M4`,
     `§b🏭 GDP/day: §7— M4`,
     `§d😊 Happiness: §d${avgMood(state)}%`,
-    `§2🍞 Food stock: §7— M3`,
+    `§2🍞 Rations: §f${Math.round(state.foodStock)}`,
     `§8🛡️ Security: §7— M9`,
     `§9🏦 Inflation: §7— M5`,
     policyLabel(state),
