@@ -70,10 +70,10 @@ KINGDOM-/
 | M6 | decrees + deadlines + managers, blueprint & scepter construction, upgrades | `game/decrees`, `build/construction`, `build/catalog` | ✅ built |
 | M7 | courtship, marriage requests, 6-day child aging, houses registry, schools | `social/family`, `social/housing` | ✅ built |
 | M8 | recruitment missions, refugee ships, harbor trade events | `world/harbor`, `world/migration` | ✅ built |
-| M9 | crime, courts, inspectors, guards/army, raids | `security/*` | ⬜ planned |
-| M10 | seasons/weather/disease events, tech tree, railway/telegraph | `events/*`, `tech/tree` | ⬜ planned |
-| M11 | co-op officer roles & permissions | `net/roles` | ⬜ planned |
-| M12 | custom art/audio, command-parser polish, Android test & packaging | `RP_Kingdom/*` | ⬜ planned |
+| M9 | crime, courts, inspectors, guards/army, raids | `security/*` | ✅ built |
+| M10 | seasons/weather/disease events, tech tree, railway/telegraph | `events/*`, `tech/tree` | ✅ built |
+| M11 | co-op officer roles & permissions | `net/roles` | ✅ built |
+| M12 | custom art/audio, command-parser polish, Android test & packaging | `RP_Kingdom/*` | ✅ built |
 
 ## 5. Engine rules we code around
 

@@ -11,6 +11,8 @@
  */
 import { world, DisplaySlotId, ObjectiveSortOrder } from "@minecraft/server";
 import { formatClock, phaseFor } from "./clock.js";
+import { securityRating } from "../security/guards.js";
+import { seasonIcon, weatherIcon } from "../events/seasons.js";
 
 const OBJ_ID = "kingdom_hud";
 const OBJ_TITLE = "§6§l👑 KINGDOM";
@@ -67,11 +69,25 @@ export function renderHud(state) {
     `§b🏭 GDP/day: §f₹${Math.round(gdp * 100) / 100}`,
     `§d😊 Happiness: §d${avgMood(state)}%`,
     `§2🍞 Rations: §f${Math.round(state.foodStock)}`,
-    `§8🛡️ Security: §7— M9`,
+    secLine(state),
+    skyLine(state),
     `§9🏦 Inflation: §f${infl}%`,
     policyLabel(state),
   ];
   lines.forEach((label, i) => obj.setScore(label, i + 1));
+}
+
+/** M9–M10: live security rating + unrest; M10: the turning sky. */
+function secLine(state) {
+  const rating = securityRating(state);
+  const color = rating >= 70 ? "§a" : rating >= 40 ? "§e" : "§c";
+  const unrest = Math.round(state.security?.unrest ?? 0);
+  return `§8🛡️ Security: ${color}${rating} §7· ✊ ${unrest}`;
+}
+
+function skyLine(state) {
+  const cl = state.climate ?? { season: "Spring", seasonDay: 1, weather: "clear" };
+  return `§7${seasonIcon(cl.season)} ${cl.season} ${cl.seasonDay}/10 §7${weatherIcon(cl.weather)} ${cl.weather}`;
 }
 
 function policyLabel(state) {

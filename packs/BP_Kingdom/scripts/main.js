@@ -22,6 +22,8 @@ import { runDayRoll } from "./game/dayroll.js";
 import { relinkAll, recordForEntity } from "./game/npcRegistry.js";
 import { handleInheritance } from "./social/housing.js";
 import { buyerForCitizen } from "./economy/buyers.js";
+import { parseCommand } from "./game/commands.js";
+import { sting } from "./core/sounds.js";
 
 /* ---------------- /kingdom:start ---------------- */
 system.beforeEvents.startup.subscribe((event) => {
@@ -49,9 +51,33 @@ system.beforeEvents.startup.subscribe((event) => {
 
 /* ---------------- Royal Scepter ---------------- */
 world.afterEvents.itemUse.subscribe((event) => {
-  if (event.itemStack?.nameTag?.includes(SCEPTER_NAME)) {
+  const stack = event.itemStack;
+  if (stack?.typeId === "kingdom:scepter" || stack?.nameTag?.includes(SCEPTER_NAME)) {
     system.run(() => openMainMenu(event.source));
   }
+});
+
+/* ---------------- Chat orders (M11: !help) ---------------- */
+world.beforeEvents.chatSend.subscribe((event) => {
+  const text = event.message ?? "";
+  if (!text.startsWith("!")) return;
+  const state = getState();
+  if (state.options?.chatOrders === false) return; // throne ignores !orders
+  event.cancel = true;
+  if (!state.founded) {
+    event.sender.sendMessage("§6[KINGDOM] §7No kingdom yet. Run §f/kingdom:start§7.");
+    return;
+  }
+  system.run(() => {
+    try {
+      const out = parseCommand(state, event.sender.name, text);
+      for (const line of out.lines) event.sender.sendMessage(line);
+      if (out.mutated) saveState();
+    } catch (err) {
+      console.warn(`[KINGDOM] chat order failed: ${err}`);
+      try { event.sender.sendMessage("§cThe clerks misheard that order."); } catch { /* */ }
+    }
+  });
 });
 
 /* ---------------- (Re)load housekeeping ---------------- */
@@ -115,6 +141,9 @@ system.runInterval(() => {
     const report = runDayRoll(state, world.getDimension("overworld"));
     for (const line of report.lines)
       for (const player of world.getAllPlayers()) player.sendMessage(line);
+    sting("dawnBell"); // M12: the dawn bell over the morning report
+    if (report.defense?.raid) sting(report.defense.won ? "trumpet" : "alarm");
+    if (state.festivalDay === state.day) sting("festival");
     saveState();
   }
 
@@ -128,4 +157,4 @@ system.runInterval(() => {
   if (state.founded) saveState();
 }, 100);
 
-console.log("[KINGDOM] M8 loaded — /kingdom:start, then rule: taxes, mint, decrees, families, harbor.");
+console.log("[KINGDOM] M12 loaded — courts, seasons, research, officers & chat orders (!help).");

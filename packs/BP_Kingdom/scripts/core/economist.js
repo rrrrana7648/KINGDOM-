@@ -37,6 +37,7 @@ export const BASE_WAGE = {
   teacher: 10,
   tailor: 10,
   buyer: 12,
+  guard: 12,
   soldier: 14,
   blacksmith: 15,
   deepMiner: 18, // deepslate gold/redstone/lapis

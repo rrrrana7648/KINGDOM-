@@ -43,13 +43,15 @@ world.setDynamicProperty("kingdom:save_v1", JSON.stringify({ version: 1, founded
 {
   const { getState, saveState } = await import(new URL("../../packs/BP_Kingdom/scripts/core/state.js?old", import.meta.url).href);
   const s = getState();
-  assert(s.version === 8 && s.foodStock === 200, "v1 document migrates to v8 with rations");
+  assert(s.version === 12 && s.foodStock === 200, "v1 document migrates to v12 with rations");
   assert(s.citizens[0].needs && s.citizens[0].cidTag === "kingdom:cid_c9", "citizen backfilled with needs + cid tag");
   assert(Array.isArray(s.buyers) && Array.isArray(s.ledger), "buyers & ledger arrays added");
   assert(s.tax && s.market && s.finances && s.mint && s.inflation && s.bank, "M4–M5 economy domains added");
   assert(Array.isArray(s.decrees) && Array.isArray(s.sites) && Array.isArray(s.buildings), "M6 decree/build domains added");
   assert(Array.isArray(s.houses) && Array.isArray(s.familyRequests), "M7 family domains added");
   assert(s.harbor && Array.isArray(s.missions), "M8 harbor domains added");
+  assert(s.security && s.security.laws && s.climate && s.tech && Array.isArray(s.pendingDecisions) && s.officers && s.options, "M9–M12 domains added (security/climate/tech/decisions/officers/options)");
+  assert(s.citizens[0].honesty >= 40 && s.citizens[0].honesty <= 95 && s.citizens[0].strikes === 0 && s.citizens[0].sick === 0, "citizen M9–M10 fields backfilled");
   assert(Number.isFinite(s.nextCitizenId) && s.nextCitizenId > 9, "collision-free counters derived");
   assert(s.citizens[0].day.earned === 0 && s.citizens[0].affection && s.citizens[0].pregnancy === null, "citizen M4–M8 fields backfilled");
   saveState(); // splits into shards and removes the legacy key
@@ -78,6 +80,16 @@ const { requestMarriage, approveMarriage, denyMarriage, requestChild, approveChi
 const { registerHouse, assignHousing, collectRents, handleInheritance, houseFor } = await mod("./social/housing.js");
 const { launchMission, tickMissions, canGrow, pullFactor } = await mod("./world/migration.js");
 const { tickHarbor, exportGoods, buyImport, decideRefugees, exportMult } = await mod("./world/harbor.js");
+const { tickCrime, fileCase, postBounty, constablePower, crimePressure } = await mod("./security/crime.js");
+const { trialReady, sentence, adviseSentence, tickPrison } = await mod("./security/courts.js");
+const { guardRoster, militiaCount, securityRating, postGuard, recallGuard, postInspector, conscript, defensePower, resolveRaid, tickDefense } = await mod("./security/guards.js");
+const { tickUnrest, unrestLevel } = await mod("./security/unrest.js");
+const { tickClimate, rollWeather, farmYield, stormBound, buildPace, proclaimFestival, seasonIcon, weatherIcon } = await mod("./events/seasons.js");
+const { tickHealth, doctorRoster, hasWell, hasHospital } = await mod("./events/health.js");
+const { rollEvents, resolveDecision, wageGap } = await mod("./events/deck.js");
+const { TECHS, techList, dailyRP, startResearch, grantResearch, tickTech, techHaste, techMarket, techBuild, techMission } = await mod("./tech/tree.js");
+const { OFFICER_ROLES, claimCrown, roleOf, require: needWrit, grantOfficer, revokeOfficer, abdicate, officerList, anyOfficers } = await mod("./net/roles.js");
+const { parseCommand } = await mod("./game/commands.js");
 
 /* ---- full day ---- */
 console.log("\n🏰 Founding & full work day");
@@ -121,7 +133,7 @@ buildWorld();
   assert(meals === 12, `settlers ate all 3 meals (${meals}/12), rations ${startFood}→${state.foodStock}`);
   assert(settlers.every((c) => c.day.slept), "all settlers reached bed & slept");
 
-  const report = runDayRoll(state);
+  const report = runDayRoll(state, undefined, () => 0.99);
   assert(report.wagesPaid === 86, "day roll pays ₹86 wages (60+9+6+6+5)");
   assert(state.citizens.every((c) => c.mood >= 5 && c.mood <= 100), "moods stay in 5–100");
   assert(report.lines.some((l) => l.includes("Produced")), "morning report lists production");
@@ -245,7 +257,7 @@ console.log("\n🛒 Licensed buyers, floats & payments");
 
   // Dusk consolidation + Day Roll: cart to warehouse, floats return & re-fund.
   const stallLogsBefore = stallChest.getComponent("inventory").container.count("minecraft:oak_log");
-  const report = runDayRoll(state, dim);
+  const report = runDayRoll(state, dim, () => 0.99);
   assert(stallChest.getComponent("inventory").container.count("minecraft:oak_log") === 0, "cart runner empties stall chest");
   assert(warehouseChest.getComponent("inventory").container.count("minecraft:oak_log") === stallLogsBefore, "logs moved to warehouse chest");
   assert((state.stockpile["minecraft:oak_log"] ?? 0) === stallLogsBefore, "stall stock consolidated into warehouse ledger");
@@ -597,9 +609,344 @@ console.log("\n⚓ M8 — Missions, clippers & refugees");
   state.foodStock = 500;
   for (const c of state.citizens) if (c.alive) c.mood = 80;
   const popBefore = state.citizens.filter((c) => c.alive).length;
-  runDayRoll(state, dim);
+  runDayRoll(state, dim, () => 0.99);
   const popAfter = state.citizens.filter((c) => c.alive).length;
   assert(popAfter === popBefore + 3, `auto-grow tithe-day brings 3 (got ${popAfter - popBefore})`);
+}
+
+/* ---- M9: crime, courts, guards, raids, unrest ---- */
+console.log("\n⚖️ M9 — The underworld, the court & the watch");
+{
+  dim.reset(); buildWorld();
+  resetState();
+  const state = getState();
+  state.founded = true; state.day = 50;
+  state.zones.town = { x: 0.5, y: G + 1, z: 0.5 };
+  const king = new Player(dim, { x: 0.5, y: G + 1, z: 0.5 });
+  dim.entities.push(king);
+  spawnMinister(king, state);
+  const party = spawnFoundingParty(king, state);
+  relinkAll(state, dim);
+  setModeAll(state, "living");
+  const [builder, cutter, farmer, laborer] = party;
+
+  const pg1 = postGuard(state, builder.id);
+  const pg2 = postGuard(state, cutter.id);
+  assert(pg1.ok && pg2.ok && guardRoster(state).length === 2, "two guards posted & armed");
+  assert(builder.armed && builder.wage === 12, "posted guard draws ₹12 + musket");
+  assert(!postGuard(state, state.citizens[0].id).ok, "the Minister does not patrol");
+  assert(securityRating(state) === 54, `security rating 54 on 2 guards (got ${securityRating(state)})`);
+  assert(constablePower(state) === 2, "constable power 2");
+  assert(Math.abs(crimePressure(state) - 0.2) < 0.001, `hungry purses breed crime pressure ≈0.2 (got ${crimePressure(state)})`);
+
+  // Fine: the tariff bites, the treasury drinks.
+  builder.savings = 100;
+  const kFine = fileCase(state, "theft", builder, { evidence: 70 });
+  assert(kFine.status === "trial", "evidence ≥60% goes straight to trial");
+  const advice = adviseSentence(state, kFine);
+  assert(advice.fine === 20 && advice.prison === 2 && !advice.banish, "theft tariff ₹20/2d, first offence");
+  const fined = sentence(state, kFine.id, "fine");
+  assert(fined.ok && builder.savings === 80 && state.dailyStats.fines === 20, "fine collects ₹20");
+  assert(state.treasury === 1020 && builder.strikes === 1, "treasury ₹1020, first strike recorded");
+
+  // Prison: hard labor, cobble for the roads, release at dawn.
+  const kCell = fileCase(state, "assault", cutter, { evidence: 80 });
+  const jailed = sentence(state, kCell.id, "prison");
+  assert(jailed.ok && cutter.status === "prisoner" && state.security.prisoners.length === 1, "assault draws the chain gang");
+  state.security.prisoners[0].daysLeft = 1;
+  const gang = tickPrison(state);
+  assert(cutter.status === "working" && gang.released.length === 1, "time served, walks free");
+  assert(state.dayProduction["minecraft:cobblestone"] === 2, "the gang broke 2 cobble");
+
+  // Banishment: the estate forfeits, the road takes them.
+  farmer.savings = 40;
+  const kBan = fileCase(state, "smuggling", farmer, { evidence: 90 });
+  const banished = sentence(state, kBan.id, "banish");
+  assert(banished.ok && !farmer.alive && farmer.status === "banished", "smuggler banished beyond the stones");
+  assert(farmer.savings === 0 && state.treasury === 1059, "₹40 estate seized, ₹1 gang upkeep (treasury ₹1059)");
+
+  // Acquittal: the gavel can also set free.
+  const kFree = fileCase(state, "bribery", laborer, { evidence: 65 });
+  const freed = sentence(state, kFree.id, "acquit");
+  assert(freed.ok && laborer.strikes === 0 && laborer.mood === 84, "acquittal steadies the suspect (78+6, no strike)");
+
+  // Neglected dockets rot: flight, bounty, recapture.
+  const kFlee = fileCase(state, "theft", laborer, { evidence: 75 });
+  kFlee.day = state.day - 5;
+  tickCrime(state, () => 0.99);
+  assert(laborer.fugitive && kFlee.verdict === "fled", "stale trial lets the suspect flee");
+  assert(postBounty(state, laborer.id, 100).ok, "₹100 bounty posted");
+  const bountyTreasury = state.treasury;
+  tickCrime(state, () => 0);
+  assert(!laborer.fugitive && state.security.bounties.length === 0, "bounty hunters drag them back in chains");
+  assert(state.treasury < bountyTreasury - 100, "bounty paid + street crime loot taken");
+  assert(trialReady(state).length >= 1, "the recaptured face trial for resisting the watch");
+
+  // Recall, inspectors, muster.
+  recallGuard(state, builder.id);
+  assert(builder.profession === "builder" && builder.wage === 9, "recalled guard resumes the trowel (₹9)");
+  assert(postInspector(state, cutter.id).ok, "sharp eyes posted as inspector");
+  assert(!postInspector(state, state.citizens[0].id).ok, "the Minister cannot audit himself");
+  const muster = conscript(state, 2);
+  assert(muster.ok && militiaCount(state) === 2 && state.security.militia.untilDay === 55, "2 militia mustered to day 55");
+  assert(defensePower(state) === 16, `militia + armed citizenry = 16 defense (got ${defensePower(state)})`);
+
+  // The streets: petition → protest → riot → rebellion, crushed then unbound.
+  state.security.unrest = 65;
+  const prot = tickUnrest(state, () => 0.99);
+  assert(state.strikeDays === 1 && prot.lines.some((l) => l.includes("PROTEST")), "protest idles the shifts");
+  state.security.unrest = 85;
+  const riotT = state.treasury;
+  const riot = tickUnrest(state, () => 0.99);
+  assert(riot.lines.some((l) => l.includes("RIOT")) && state.treasury === Math.round((riotT - 59) * 100) / 100, "riot burns ₹59 of damage");
+  assert(state.security.unrest === 68, "the riot vents pressure (85−2 drift−15 → 68)");
+  postGuard(state, laborer.id); postGuard(state, builder.id); postGuard(state, cutter.id);
+  state.security.unrest = 97;
+  const crushed = tickUnrest(state, () => 0.99);
+  assert(crushed.lines.some((l) => l.includes("crushed")) && state.security.unrest === 60, "the garrison holds the square");
+  for (const g of guardRoster(state)) recallGuard(state, g.id);
+  state.security.unrest = 97;
+  const lootT = state.treasury;
+  const rising = tickUnrest(state, () => 0.99);
+  assert(rising.lines.some((l) => l.includes("unbound")) && state.ministerStrikes === 1, "an unguarded rebellion sacks the treasury");
+  assert(state.treasury === lootT - Math.floor(lootT * 0.25), "the mob takes its quarter (floored)");
+
+  // Militia stands down past its muster.
+  state.security.militia.untilDay = state.day - 1;
+  const stand = tickDefense(state, () => 0.99);
+  assert(state.security.militia === null && stand.lines.some((l) => l.includes("stands down")), "muster expires cleanly");
+
+  // A victorious raid: barracks, muster & the watch turn raid power 45.
+  state.buildings.push({ buildingId: "barracks", name: "Barracks", level: 1, loc: { x: 0, y: G, z: 0 }, day: 50 });
+  assert(conscript(state, 1).ok, "one more pike joins the muster");
+  postGuard(state, laborer.id); postGuard(state, builder.id); postGuard(state, cutter.id);
+  assert(defensePower(state) === 57, `3 guards + muster + armed + barracks = 57 (got ${defensePower(state)})`);
+  const won = resolveRaid(state, () => 0);
+  assert(won.raid && won.won && state.security.lastRaidDay === state.day, "the watch drives the bandits off");
+  assert(builder.xp >= 20, "victory drills the guard (+20xp)");
+
+  // The full dawn now settles justice, war and fate together.
+  const dawn = runDayRoll(state, dim, () => 0.99);
+  assert(dawn.climate && dawn.health && dawn.crime && dawn.prison && dawn.defense && dawn.tech && dawn.fate && dawn.unrest, "day roll returns every M9–M10 tick");
+  assert(dawn.lines.some((l) => l.includes("security")), "morning report carries the security line");
+}
+
+console.log("\n🛡️ M9 — A lost raid, paid in coin and blood");
+{
+  dim.reset(); buildWorld();
+  resetState();
+  const state = getState();
+  state.founded = true; state.day = 50;
+  state.zones.town = { x: 0.5, y: G + 1, z: 0.5 };
+  const king = new Player(dim, { x: 0.5, y: G + 1, z: 0.5 });
+  dim.entities.push(king);
+  spawnMinister(king, state);
+  spawnFoundingParty(king, state);
+  relinkAll(state, dim);
+  setModeAll(state, "living");
+  const lost = resolveRaid(state, () => 0.99);
+  assert(lost.raid && !lost.won, "undefended town falls (0 vs ~94)");
+  assert(state.treasury === 850 && state.foodStock === 161, "loot ₹150, granary −39");
+  assert(state.security.unrest === 8 && state.dailyStats.security === 39, "unrest +8, repairs ₹39");
+  assert(lost.lines.some((l) => l.includes("RAID")) && state.citizens.every((c) => c.alive), "three wounded, none fallen");
+}
+
+/* ---- M10: seasons, health, fate, research ---- */
+console.log("\n🌦 M10 — The turning sky, doctors, fate & philosophy");
+{
+  dim.reset(); buildWorld();
+  resetState();
+  const state = getState();
+  state.founded = true; state.day = 60;
+  state.zones.town = { x: 0.5, y: G + 1, z: 0.5 };
+  const king = new Player(dim, { x: 0.5, y: G + 1, z: 0.5 });
+  dim.entities.push(king);
+  spawnMinister(king, state);
+  const party = spawnFoundingParty(king, state);
+  relinkAll(state, dim);
+  setModeAll(state, "living");
+
+  const c1 = tickClimate(state, () => 0);
+  assert(state.climate.seasonDay === 2 && state.climate.weather === "rain", "spring rain on day 2");
+  state.climate.seasonDay = 10;
+  tickClimate(state, () => 0.99);
+  assert(state.climate.season === "Summer" && state.climate.seasonDay === 1, "summer follows spring");
+  assert(rollWeather(state, () => 0) === "rain", "monsoon summer rains");
+  state.climate.season = "Winter";
+  assert(rollWeather(state, () => 0) === "frost", "winter bites");
+  state.climate.seasonDay = 10;
+  tickClimate(state, () => 0.99);
+  assert(state.climate.season === "Spring" && state.climate.year === 2, "the year turns");
+  assert(seasonIcon("Winter") === "❄️" && weatherIcon("storm") === "⛈️", "sky icons render");
+
+  state.climate.weather = "heatwave";
+  assert(farmYield(state) === 0.6, "heatwave starves unirrigated fields (×0.6)");
+  state.tech.unlocked.push("irrigation");
+  assert(farmYield(state) === 1.05, "canals turn heat to profit (×1.05)");
+  state.climate.weather = "storm";
+  assert(stormBound(state) && buildPace(state) === 0.5, "storms shelter crews, halve the scaffold");
+  state.climate.weather = "frost";
+  assert(buildPace(state) === 0.75, "frost slows the scaffold");
+
+  const feast = proclaimFestival(state);
+  assert(feast.ok && state.festivalDay === 60 && state.foodStock === 190 && state.treasury === 990, "festival feasts 10 rations + ₹10");
+  assert(party.every((c) => c.mood === 88), "festival joy +10 across the town (78→88)");
+
+  // Fever without doctors worsens; doctors turn it.
+  party[0].sick = 3; party[1].sick = 3;
+  const flu = tickHealth(state, () => 0.99);
+  assert(flu.sick === 2 && party[0].health === 18 && party[0].sick === 2, "untended fever deepens (18♥, 2 days)");
+  party[2].profession = "doctor";
+  assert(doctorRoster(state).length === 1, "one doctor answers the bell");
+  tickHealth(state, () => 0.99);
+  assert(party[0].sick === 0 && party[0].health === 20, "doctor's rounds cure the fever");
+  state.buildings.push({ buildingId: "well", name: "Well", level: 1, loc: { x: 0, y: G, z: 0 }, day: 60 });
+  state.buildings.push({ buildingId: "hospital", name: "Hospital", level: 1, loc: { x: 1, y: G, z: 0 }, day: 60 });
+  assert(hasWell(state) && hasHospital(state), "wells & wards stand");
+
+  // Famine counts hunger, then health, then breaks on bread.
+  state.foodStock = 0; state.hungerDays = 2;
+  const famine = tickHealth(state, () => 0.99);
+  assert(state.hungerDays === 3 && famine.lines.some((l) => l.includes("FAMINE")), "third hungry dawn cries FAMINE");
+  assert(party[0].health === 17, "famine gnaws (17♥)");
+  state.foodStock = 50;
+  tickHealth(state, () => 0.99);
+  assert(state.hungerDays === 0, "bread breaks the famine count");
+
+  // Philosophy: schools drip, grants pour, tools complete.
+  state.buildings.push({ buildingId: "school", name: "School", level: 1, loc: { x: 2, y: G, z: 0 }, day: 60 });
+  party[3].profession = "teacher";
+  assert(dailyRP(state) === 3, "school + teacher drip 3 RP/day");
+  assert(Object.keys(TECHS).length === 7, "seven inquiries on the tree");
+  assert(startResearch(state, "tools").ok, "tools inquiry begun");
+  assert(!startResearch(state, "railway").ok, "railway locked behind steam");
+  const endowed = grantResearch(state, 100);
+  assert(endowed.ok && endowed.rp === 10 && state.treasury === 890, "₹100 endows 10 RP");
+  const eureka = tickTech(state);
+  assert(eureka.completed === "tools" && state.tech.unlocked.includes("tools"), "EUREKA: improved tools mastered");
+  assert(eureka.lines.some((l) => l.includes("EUREKA")), "eureka cried in the report");
+  assert(techHaste(state, "builder") === 1.15, "steel edges hasten hands ×1.15");
+  startResearch(state, "steam");
+  grantResearch(state, 200);
+  tickTech(state);
+  assert(state.tech.unlocked.includes("steam") && Math.abs(techHaste(state, "builder") - 1.4375) < 0.001, `steam × tools ≈ ×1.4375 (got ${techHaste(state, "builder")})`);
+  state.tech.unlocked.push("railway", "telegraph");
+  assert(techMarket(state) === 0.2 && techBuild(state) === 1.25 && techMission(state) === 1, "railway & telegraph dividends hold");
+
+  // Fate: expiry, a busy throne, a mine collapse, a caravan bargain.
+  assert(wageGap(state) > 0, `wages lag the living wage (gap ₹${wageGap(state)})`);
+  state.pendingDecisions.push({ id: "x-9", eventId: "nomads", title: "Old caravan", body: "b", options: [], data: {}, day: 1, expiryDay: state.day - 1 });
+  const stale = rollEvents(state, () => 0.99);
+  assert(state.pendingDecisions.length === 0 && stale.lines.some((l) => l.includes("passed undecided")), "stale moments pass");
+  state.pendingDecisions.push(
+    { id: "x-a", eventId: "t", title: "a", body: "b", options: [], data: {}, day: 60, expiryDay: 62 },
+    { id: "x-b", eventId: "t", title: "b", body: "b", options: [], data: {}, day: 60, expiryDay: 62 },
+    { id: "x-c", eventId: "t", title: "c", body: "b", options: [], data: {}, day: 60, expiryDay: 62 },
+  );
+  const busy = rollEvents(state, () => 0);
+  assert(busy.fired === null, "a thrice-burdened throne draws no new fate");
+  state.pendingDecisions = [];
+  const treasBeforeEvent = state.treasury;
+  const fate = rollEvents(state, () => 0);
+  assert(fate.fired === "mine_collapse" && fate.lines.some((l) => l.includes("MINE")), "fate strikes the pit first");
+  assert(state.treasury < treasBeforeEvent, "the rescue costs coin");
+  state.pendingDecisions.push({ id: "x-1", eventId: "nomads", title: "Caravan", body: "b", options: [{ id: "buy", label: "Buy" }, { id: "decline", label: "No" }], data: { goods: "silk", price: 40 }, day: 60, expiryDay: 62 });
+  const tb = state.treasury;
+  const bargain = resolveDecision(state, "x-1", "buy");
+  assert(bargain.ok && state.treasury === tb - 20 && state.pendingDecisions.length === 0, "caravan bought: −₹40 + ₹20 resale");
+  assert(!resolveDecision(state, "x-zzz", "buy").ok, "unknown moments pass unruled");
+}
+
+/* ---- M11: the King's officers ---- */
+console.log("\n🕯️ M11 — Officers & writs");
+{
+  dim.reset(); buildWorld();
+  resetState();
+  const state = getState();
+  state.founded = true;
+  const first = claimCrown(state, "Steve");
+  assert(first.claimed && first.crown === "Steve", "first scepter claims the Crown");
+  const second = claimCrown(state, "Alex");
+  assert(!second.claimed && second.crown === "Steve", "the throne holds one head");
+  assert(roleOf(state, "steve") === "crown" && roleOf(state, "Bob") === null, "roles read, case-blind");
+  assert(Object.keys(OFFICER_ROLES).length === 4, "four great offices");
+  assert(needWrit(state, "Bob", "judge").ok, "an unofficered realm stays open");
+  assert(!grantOfficer(state, "Bob", "magistrate", "Alex").ok, "pretenders commission none");
+  assert(grantOfficer(state, "Steve", "magistrate", "Alex").ok && anyOfficers(state), "the Crown commissions a Magistrate");
+  assert(officerList(state).officers.magistrate === "Alex", "the court roll names Alex");
+  assert(needWrit(state, "Alex", "judge").ok, "the Magistrate holds the gavel writ");
+  const refused = needWrit(state, "Bob", "judge");
+  assert(!refused.ok && refused.reason.includes("Magistrate"), "strangers are shown the door: " + refused.reason);
+  assert(needWrit(state, "Steve", "muster").ok, "the Crown's word overrides all");
+  assert(grantOfficer(state, "Steve", "marshal", "Bob").ok, "a Marshal keeps the realm gated");
+  assert(revokeOfficer(state, "Steve", "magistrate").ok && !needWrit(state, "Alex", "judge").ok, "dismissal reclaims the seal");
+  abdicate(state, "Steve", "Bob");
+  assert(roleOf(state, "Bob") === "crown", "abdication passes the Crown");
+  abdicate(state, "Bob");
+  assert(claimCrown(state, "Alex").claimed, "a vacant throne may be claimed");
+}
+
+/* ---- M12: chat orders ---- */
+console.log("\n💬 M12 — Rule from the keyboard");
+{
+  dim.reset(); buildWorld();
+  resetState();
+  const state = getState();
+  state.founded = true; state.day = 70;
+  state.zones.town = { x: 0.5, y: G + 1, z: 0.5 };
+  const king = new Player(dim, { x: 0.5, y: G + 1, z: 0.5 });
+  dim.entities.push(king);
+  spawnMinister(king, state);
+  const party = spawnFoundingParty(king, state);
+  relinkAll(state, dim);
+  setModeAll(state, "living");
+  claimCrown(state, "Steve");
+
+  assert(parseCommand(state, "Steve", "hello") === null, "plain chat passes through");
+  assert(parseCommand(state, "Steve", "!help").lines.some((l) => l.includes("treasury")), "!help teaches the orders");
+  assert(parseCommand(state, "Steve", "!status").lines[0].includes("Day 70"), "!status reports the day");
+  assert(parseCommand(state, "Steve", "!treasury").lines[0].includes("₹1000"), "!treasury counts ₹1000");
+  assert(parseCommand(state, "Steve", "!mood").lines[0].includes("Mood"), "!mood reads the town");
+  assert(parseCommand(state, "Steve", "!docket").lines[0].includes("empty"), "an empty docket holds the peace");
+  assert(parseCommand(state, "Steve", "!cases").lines[0].includes("No open cases"), "!cases finds clean streets");
+  assert(parseCommand(state, "Steve", "!guards").lines[0].includes("none"), "!guards musters none");
+  assert(parseCommand(state, "Steve", "!tech").lines[0].includes("RP banked"), "!tech opens the ledger of philosophy");
+  assert(parseCommand(state, "Steve", "!officers").lines[0].includes("Steve"), "!officers names the Crown");
+  assert(parseCommand(state, "Steve", "!frobnicate").lines[0].includes("Unknown order"), "unknown orders confess ignorance");
+
+  const k = fileCase(state, "theft", party[0], { evidence: 70 });
+  const judged = parseCommand(state, "Steve", `!judge ${k.id} fine`);
+  assert(judged.mutated && judged.lines[0].includes("fined"), "!judge fines from chat");
+  party[1].fugitive = true;
+  const firstName = party[1].fullName.split(" ")[0];
+  const bounty = parseCommand(state, "Steve", `!bounty "${firstName}" 50`);
+  assert(bounty.mutated && state.security.bounties.length === 1, "!bounty posts ₹50 on a name");
+  const mustered = parseCommand(state, "Steve", "!muster 4");
+  assert(mustered.mutated && militiaCount(state) === 4, "!muster raises 4");
+  const fest = parseCommand(state, "Steve", "!festival");
+  assert(fest.mutated && state.festivalDay === 70, "!festival proclaims the feast");
+  parseCommand(state, "Steve", "!festival off");
+  assert(state.festivalDay === -1, "!festival off calls it back");
+  parseCommand(state, "Steve", "!ration");
+  assert(state.rationing, "!ration halves the bread");
+  parseCommand(state, "Steve", "!quarantine");
+  assert(state.quarantine, "!quarantine bars the gates");
+  parseCommand(state, "Steve", "!ration");
+  parseCommand(state, "Steve", "!quarantine");
+
+  const granted = parseCommand(state, "Steve", "!grant magistrate Alex");
+  assert(granted.mutated && roleOf(state, "Alex") === "magistrate", "!grant commissions from chat");
+  const k2 = fileCase(state, "theft", party[2], { evidence: 70 });
+  const refused = parseCommand(state, "Bob", `!judge ${k2.id} fine`);
+  assert(!refused.mutated && refused.lines[0].includes("Magistrate"), "chat writs bind strangers too");
+  const revoked = parseCommand(state, "Steve", "!revoke magistrate");
+  assert(revoked.mutated && roleOf(state, "Alex") === null, "!revoke reclaims the seal");
+  assert(parseCommand(state, "Steve", "!decide").lines[0].includes("No moments"), "!decide finds a quiet throne");
+  state.pendingDecisions.push({ id: "x-7", eventId: "nomads", title: "Caravan", body: "b", options: [{ id: "buy", label: "Buy" }, { id: "decline", label: "No" }], data: { goods: "silk", price: 40 }, day: 70, expiryDay: 72 });
+  assert(parseCommand(state, "Steve", "!decide").lines[0].includes("Awaiting"), "!decide lists the moment");
+  const ruled = parseCommand(state, "Steve", "!decide x-7 decline", { rng: () => 0.5 });
+  assert(ruled.mutated && state.pendingDecisions.length === 0, "!decide rules the road");
+  assert(parseCommand(state, "Steve", "!advance").lines[0].includes("sun"), "!advance bows to the sun");
 }
 
 console.log("\n🚦 Warnings");

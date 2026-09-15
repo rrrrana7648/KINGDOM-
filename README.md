@@ -8,7 +8,7 @@ Rule a living Victorian-era colony inside Minecraft **Bedrock** (mobile): you ar
 - 🧩 Language: **JavaScript (Script API 2.1.0)** + JSON — Bedrock cannot run Java/Forge mods
 - 📦 Shipped as one `.mcaddon` (Behavior Pack + Resource Pack)
 
-## ▶️ Play the current build (Milestones M1–M8)
+## ▶️ Play the current build (Milestones M1–M12)
 
 - **M1:** `/kingdom:start` founding flow, Sir Edmund Hale (Minister), 2-men + 2-women founding party, Royal Scepter menu, live action-bar colony clock (vanilla 20-minute day), sidebar HUD, population policy, suggested wages, world-saved state.
 - **M2:** citizens follow the King or live the daily schedule (breakfast · two shifts · lunch · deliveries · dinner · leisure · curfew sleep), need bars and mood, woodcutter/farmer/quarry labor with replanting and XP levels, follow/armed/profession orders, work-site marking, stockpile chest delivery, monster flight, daily wage roll, death handling, relog-safe NPC linking.
@@ -18,11 +18,15 @@ Rule a living Victorian-era colony inside Minecraft **Bedrock** (mobile): you ar
 - **M6:** royal **decrees with deadlines & budgets** (build, recruit, stockpile, tax edict, custom), manager reports, completion bonuses, missed-deadline strikes; **blueprint construction** with crews, warehouse materials and real raised footprints; building halls buff their trades; scepter town plazas; hands-off ruling budget.
 - **M7:** consent-gated **courtship → marriage requests → engagements → weddings**, child requests with thresholds, 3-day pregnancies, **6-day childhood** (baby → toddler → child → adult with inherited XP), single-adopter orphans, named **house registry** with rents, wills & inheritance.
 - **M8:** **recruiter missions** and **refugee ships** (willing, paid migration gated by food/beds/happiness and population policy), buildable **harbor** with clipper schedules, world-price booms/gluts, exports, imports and duties, auto-grow tithe-days.
+- **M9:** the underworld (theft, smuggling, embezzlement audits, counterfeiting, fugitives & bounties), the **Magistrate's court** (docket, tariff laws, fines/prison/banishment, chain gang), posted **guards** with day patrols + alternating night watches, inspectors, paid **militia**, bandit **raids**, and the unrest ladder (petitions → strikes → riots → rebellion).
+- **M10:** the turning year (40-day seasons, monsoon/frost/storms shaping farms & scaffolds), **festivals**, rationing & quarantine, sickness/doctors/plague/famine with a **graveyard**, a 16-card **fate deck** with pending royal decisions, and a 7-inquiry **research tree** (irrigation, tools, steam, railway, telegraph, medicine, platecraft).
+- **M11:** co-op rule — first scepter claims the **Crown**, which commissions Chamberlain/Treasurer/Magistrate/Marshal; gated writs bind every menu and the full **`!chat orders`** system (`!help`).
+- **M12:** forged **custom items** (Royal Scepter, gavel, guard badge, royal seal, research scroll), curated sound **stings** with mute, live security + sky HUD, and one-command packaging & validation.
 
 1. Run `bash tools/package.sh` (or download a release `.mcaddon`).
 2. Copy `dist/KINGDOM.mcaddon` to your Android phone and open it with Minecraft — both packs import.
 3. Create a new world → Behavior Packs & Resource Packs → enable **KINGDOM**.
-4. Run `/kingdom:start` and follow Sir Edmund. Long-press the **Royal Scepter** (stick) to open the Kingdom Menu.
+4. Run `/kingdom:start` and follow Sir Edmund. Long-press the **Royal Scepter** (custom regalia, auto-granted) to open the Kingdom Menu — or rule from chat with `!help`.
 
 > Custom commands in API 2.1.0 are stable — no Beta Experiments toggle needed. The command is namespaced by Bedrock rules: **`/kingdom:start`** (a bare `/kingdom` is not permitted by the engine).
 
@@ -38,4 +42,4 @@ tools/package.sh → dist/KINGDOM.mcaddon
 
 ## 🚧 Status
 
-M1–M8 built and regression-tested (`tools/sim`); milestones M9–M12 are defined in the technical plan. No content from the design's boundary list (forced labor/marriage/explicit content) will be implemented.
+M1–M12 built and regression-tested (`tools/sim`, green, zero warnings). No content from the design's boundary list (forced labor/marriage/explicit content) was implemented.

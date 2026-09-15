@@ -7,6 +7,10 @@
  * M6: Decrees & Building — edicts with deadlines, crews, sites, catalogue.
  * M7: Families & Houses — requests inbox, matchmaker, housing registry.
  * M8: Harbor & Missions — exports, imports, refugees, recruiter missions.
+ * M9: Court & Watch — docket, sentences, laws, guards, militia, bounties.
+ * M10: Sky & Research — seasons, festivals, rationing, quarantine, tech.
+ * M11: Officers & Orders — co-op writs, chat orders (!help).
+ * M12: stings on verdicts, festivals, weddings; hiss-free gating.
  */
 import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 import { world } from "@minecraft/server";
@@ -34,8 +38,26 @@ import {
 import { registerHouse, demolishHouse, houseFor } from "../social/housing.js";
 import { launchMission, missionCost, missionDays, pullFactor } from "../world/migration.js";
 import { exportGoods, buyImport, decideRefugees, harborBoard, IMPORT_CATALOG } from "../world/harbor.js";
+import { trialReady, sentence, adviseSentence } from "../security/courts.js";
+import { postBounty, constablePower } from "../security/crime.js";
+import { guardRoster, militiaCount, securityRating, postGuard, recallGuard, postInspector, conscript } from "../security/guards.js";
+import { unrestLevel } from "../security/unrest.js";
+import { seasonIcon, weatherIcon, proclaimFestival } from "../events/seasons.js";
+import { doctorRoster } from "../events/health.js";
+import { resolveDecision } from "../events/deck.js";
+import { techList, startResearch, grantResearch, dailyRP } from "../tech/tree.js";
+import { claimCrown, roleOf, require as need, grantOfficer, revokeOfficer, officerList, OFFICER_ROLES } from "../net/roles.js";
+import { sting } from "../core/sounds.js";
 
-const PROFESSIONS = ["woodcutter", "farmer", "builder", "laborer"];
+/** Gated writs: returns true when the player may proceed. */
+function writ(player, state, action) {
+  const g = need(state, player.name, action);
+  if (!g.ok) player.sendMessage(`§c${g.reason}`);
+  return g.ok;
+}
+
+const PROFESSIONS = ["woodcutter", "farmer", "builder", "laborer", "doctor", "teacher"];
+// (Guards & inspectors are posted at ⚖️ Royal Guard — the posting arms them.)
 const DIM = () => world.getDimension("overworld");
 
 export async function openMainMenu(player) {
@@ -49,7 +71,17 @@ export async function openMainMenu(player) {
   const gdp = state.finances?.lastGDP ?? 0;
   const infl = state.inflation?.pct ?? 0;
   const kids = state.citizens.filter((c) => c.alive && c.ageStage !== "adult").length;
-  const pending = pendingRequests(state).length + (state.harbor?.pendingDecision ? 1 : 0);
+  const pending = pendingRequests(state).length + (state.harbor?.pendingDecision ? 1 : 0) + (state.pendingDecisions ?? []).length;
+  // M11: the first hand to raise the Scepter claims the Crown.
+  const claim = claimCrown(state, player.name);
+  if (claim.claimed) {
+    saveState();
+    player.sendMessage(`§6👑 The Scepter accepts you — you are CROWNED ${player.name}. Commission officers at 🕯️ Officers & Orders.`);
+  }
+  const cl = state.climate ?? { season: "Spring", seasonDay: 1, year: 1, weather: "clear" };
+  const docket = trialReady(state).length;
+  const role = roleOf(state, player.name);
+  const roleTag = role === "crown" ? "§6👑 Crown" : role ? `§b🕯️ ${OFFICER_ROLES[role].name}` : "§7visitor";
   const body =
     `§6§l${state.colony.name}§r   §7· §fDay ${state.day}\n` +
     `§7Banner §f${state.colony.bannerColor} §7| Difficulty §f${state.colony.difficulty}\n\n` +
@@ -59,7 +91,9 @@ export async function openMainMenu(player) {
     `§b🏭 GDP §f₹${gdp} §7· §a📈 net ${net >= 0 ? "§a" : "§c"}₹${net} §7· §9inflation §f${infl}%\n` +
     `§d😊 Happiness: §d${mood}%` +
     (pending > 0 ? ` §7· §e💌 ${pending} awaiting you` : "") + `\n` +
-    `§e⏰ ${formatClock(world.getTimeOfDay())} §7— ${phaseFor(world.getTimeOfDay())}`;
+    `§7${seasonIcon(cl.season)} ${cl.season} ${cl.seasonDay}/10 · ${weatherIcon(cl.weather)} ${cl.weather} §7| 🛡️ §f${securityRating(state)} §7| ✊ §f${Math.round(state.security.unrest)} §7(${(unrestLevel(state.security.unrest))})` +
+    (docket > 0 ? ` §7| §6⚖️ ${docket} to judge` : "") + `\n` +
+    `§e⏰ ${formatClock(world.getTimeOfDay())} §7— ${phaseFor(world.getTimeOfDay())} §7| you rule as ${roleTag}`;
 
   const form = new ActionFormData()
     .title("👑 Kingdom Menu")
@@ -74,6 +108,9 @@ export async function openMainMenu(player) {
     .button("🏗 Decrees & Building")
     .button("🏠 Families & Houses")
     .button("⚓ Harbor & Missions")
+    .button(`⚖️ Court & Watch${docket > 0 ? ` (${docket})` : ""}`)
+    .button("🌦 Sky & Research")
+    .button("🕯️ Officers & Orders")
     .button("📒 Audit Ledger")
     .button("📈 Growth Policy")
     .button("⏰ Clock & Day Settings");
@@ -90,9 +127,12 @@ export async function openMainMenu(player) {
     case 7: return openDecrees(player);
     case 8: return openFamily(player);
     case 9: return openHarbor(player);
-    case 10: return openLedger(player);
-    case 11: return openPopulationPolicy(player);
-    case 12: return openClockSettings(player);
+    case 10: return openCourt(player);
+    case 11: return openSky(player);
+    case 12: return openOfficers(player);
+    case 13: return openLedger(player);
+    case 14: return openPopulationPolicy(player);
+    case 15: return openClockSettings(player);
   }
 }
 
@@ -441,25 +481,55 @@ async function openAudiences(player) {
   const state = getState();
   const reqs = pendingRequests(state);
   const pd = state.harbor?.pendingDecision;
+  const decisions = state.pendingDecisions ?? [];
   const lines = [];
-  if (!reqs.length && !pd) lines.push("§8No petitions await. The throne room is quiet.");
+  if (!reqs.length && !pd && !decisions.length) lines.push("§8No petitions await. The throne room is quiet.");
   for (const r of reqs) {
     lines.push(r.type === "marriage"
       ? `§d💒 ${r.aName} ♥ ${r.bName} §7— marriage (${r.compat}% match, day ${r.day})`
       : `§a👶 ${r.aName}${r.bName ? ` & ${r.bName}` : ""} §7— child request (day ${r.day})`);
   }
   if (pd) lines.push(`§e⛵ ${pd.count} refugees beg sanctuary (until day ${pd.expiryDay}).`);
+  for (const d of decisions) {
+    lines.push(`§6⌛ ${d.title} §7(expires day ${d.expiryDay})`);
+  }
   const form = new ActionFormData().title("💌 Audiences & Requests").body(lines.join("\n"));
   for (const r of reqs) {
     form.button(r.type === "marriage" ? `💒 ${r.aName.split(" ")[0]} ♥ ${r.bName.split(" ")[0]}` : `👶 ${r.aName.split(" ")[0]}'s household`);
   }
   if (pd) form.button(`⛵ ${pd.count} refugees`);
+  for (const d of decisions) form.button(`⌛ ${d.title}`);
   form.button("§8← Back");
   const res = await form.show(player);
   if (res.canceled) return;
-  if (res.selection === reqs.length + (pd ? 1 : 0)) return openMainMenu(player);
+  const nDecide = decisions.length;
+  if (res.selection === reqs.length + (pd ? 1 : 0) + nDecide) return openMainMenu(player);
   if (pd && res.selection === reqs.length) return openRefugees(player);
+  if (res.selection >= reqs.length + (pd ? 1 : 0)) {
+    return openDecision(player, decisions[res.selection - reqs.length - (pd ? 1 : 0)]);
+  }
   return openRequest(player, reqs[res.selection]);
+}
+
+/** M10: fate's pending decisions — two roads, the King's to choose. */
+async function openDecision(player, d) {
+  const state = getState();
+  if (!d || !(state.pendingDecisions ?? []).some((x) => x.id === d.id)) {
+    player.sendMessage("§7⌛ That moment has passed.");
+    return openAudiences(player);
+  }
+  const form = new ActionFormData()
+    .title("⌛ The King's Word")
+    .body(`§6§l${d.title}§r\n§7${d.body}\n\n§8Undecided, the moment passes on day ${d.expiryDay}.`);
+  for (const o of d.options) form.button(`${o.label}\n§7${o.desc}`);
+  form.button("§8← Later");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === d.options.length) return openAudiences(player);
+  const out = resolveDecision(state, d.id, d.options[res.selection].id);
+  saveState();
+  player.sendMessage(out.ok ? out.line : `§c${out.reason}`);
+  if (out.ok) sting("trumpet");
+  return openAudiences(player);
 }
 
 async function openRequest(player, r) {
@@ -476,6 +546,7 @@ async function openRequest(player, r) {
     .button("§8← Back");
   const res = await form.show(player);
   if (res.canceled || res.selection === 2) return openAudiences(player);
+  if (!writ(player, state, "decree")) return openAudiences(player);
   let out;
   if (isMarriage) out = res.selection === 0 ? approveMarriage(state, r.id) : denyMarriage(state, r.id);
   else out = res.selection === 0 ? approveChild(state, r.id) : denyChild(state, r.id);
@@ -483,6 +554,7 @@ async function openRequest(player, r) {
   player.sendMessage(out.ok
     ? (res.selection === 0 ? "§a👑 The crown approves. Joy spreads through the colony." : "§7👑 Declined with kindness. Life goes on.")
     : `§c${out.reason}`);
+  if (out.ok && res.selection === 0 && isMarriage) sting("wedding");
   return openAudiences(player);
 }
 
@@ -525,6 +597,7 @@ async function openTreasury(player) {
     .button("§8← Back");
   const res = await form.show(player);
   if (res.canceled || res.selection === 3) return res.selection === 3 ? openMainMenu(player) : undefined;
+  if (!writ(player, state, "rates")) return openTreasury(player);
   if (res.selection === 0) return openTaxPresets(player);
   if (res.selection === 1) return openTaxLevers(player);
   state.tax.holidayDays = 3;
@@ -595,6 +668,7 @@ async function openMintBank(player) {
     .button("§8← Back");
   const res = await form.show(player);
   if (res.canceled || res.selection === 8) return res.selection === 8 ? openMainMenu(player) : undefined;
+  if (res.selection >= 3 && res.selection <= 7 && !writ(player, state, "spend")) return openMintBank(player);
   switch (res.selection) {
     case 0: {
       const m = new ModalFormData().title("📄 Mill paper").slider("Paper units", 1, 20, 1, 5);
@@ -701,7 +775,7 @@ async function openCrownDebt(player) {
   const state = getState();
   const form = new ActionFormData()
     .title("💳 National debt")
-    .body(`§7Owed abroad: §c₹${Math.round(state.bbank.crownDebt)} §7at ${state.bank.crownRate}%/30d.\n§7Treasury: §e₹${Math.round(state.treasury)}`)
+    .body(`§7Owed abroad: §c₹${Math.round(state.bank.crownDebt)} §7at ${state.bank.crownRate}%/30d.\n§7Treasury: §e₹${Math.round(state.treasury)}`)
     .button("📥 Borrow abroad")
     .button("📤 Repay debt")
     .button("§8← Back");
@@ -1273,17 +1347,412 @@ async function openPopulationPolicy(player) {
 
 async function openClockSettings(player) {
   const state = getState();
+  const stings = state.options?.stings !== false;
+  const chat = state.options?.chatOrders !== false;
   const form = new ActionFormData()
     .title("⏰ Clock & Day Settings")
     .body(
       `§7• Day length: §f${state.timePresetMinutes} real minutes §7(standard Minecraft)\n` +
-      `§7• Now: §f${formatClock(world.getTimeOfDay())} — ${phaseFor(world.getTimeOfDay())}\n\n` +
-      `§720 real minutes = one colony day; tick 0 = 06:00 breakfast bell. ` +
-      `Longer day presets (40/60/90) arrive with the time-decree system (M6).`
+      `§7• Now: §f${formatClock(world.getTimeOfDay())} — ${phaseFor(world.getTimeOfDay())}\n` +
+      `§7• Sound stings: ${stings ? "§aON" : "§8muted"} §7• Chat orders: ${chat ? "§aON" : "§8off"}\n\n` +
+      `§720 real minutes = one colony day; tick 0 = 06:00 breakfast bell.`
     )
+    .button(`🔔 Sound stings: ${stings ? "ON" : "OFF"}`)
+    .button(`💬 Chat orders: ${chat ? "ON" : "OFF"}`)
     .button("§8← Back");
   const res = await form.show(player);
-  if (!res.canceled) return openMainMenu(player);
+  if (res.canceled) return;
+  if (res.selection === 0) {
+    state.options.stings = !stings;
+    saveState();
+    if (state.options.stings) sting("coin");
+    return openClockSettings(player);
+  }
+  if (res.selection === 1) {
+    state.options.chatOrders = !chat;
+    saveState();
+    player.sendMessage(chat ? "§7💬 Chat orders OFF — the throne ignores !orders." : "§7💬 Chat orders ON — say !help.");
+    return openClockSettings(player);
+  }
+  return openMainMenu(player);
+}
+
+/* ---------------- Court & Watch (M9) ---------------- */
+
+async function openCourt(player) {
+  const state = getState();
+  const docket = trialReady(state);
+  const open = (state.security.cases ?? []).filter((k) => k.status === "rumored").length;
+  const gang = (state.security.prisoners ?? []).length;
+  const fugitives = state.citizens.filter((c) => c.alive && c.fugitive);
+  const lines =
+    `§7Security §f${securityRating(state)}/100 §7· constables §f${Math.round(constablePower(state) * 10) / 10} §7· unrest §f${Math.round(state.security.unrest)} §7(${(unrestLevel(state.security.unrest))})\n` +
+    `§7Docket §f${docket.length} §7ready · §f${open} §7under investigation · ⛓ §f${gang} §7on the chain gang · 🥷 §f${fugitives.length} §7fugitive${fugitives.length === 1 ? "" : "s"}`;
+  const form = new ActionFormData()
+    .title("⚖️ Court & Watch")
+    .body(lines)
+    .button(`⚖️ The docket (${docket.length})`)
+    .button(`🌑 Investigations (${open})`)
+    .button(`🥷 Fugitives & bounties (${fugitives.length})`)
+    .button("📜 Laws of the realm")
+    .button("🛡️ Royal Guard & militia")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled) return;
+  switch (res.selection) {
+    case 0: return openDocket(player);
+    case 1: return openInvestigations(player);
+    case 2: return openFugitives(player);
+    case 3: return openLaws(player);
+    case 4: return openWatch(player);
+    default: return openMainMenu(player);
+  }
+}
+
+async function openDocket(player) {
+  const state = getState();
+  const docket = trialReady(state);
+  if (!docket.length) {
+    player.sendMessage("§7⚖️ The docket is empty — the peace holds.");
+    return openCourt(player);
+  }
+  const form = new ActionFormData()
+    .title("⚖️ The docket")
+    .body("§7Evidence ≥ 60% is trial-ready. Unjudged cases rot — suspects flee after 3 dawns.");
+  for (const k of docket.slice(0, 10)) {
+    const ad = adviseSentence(state, k);
+    form.button(`${k.name} — ${k.suspect}\n§7ev ${Math.round(k.evidence)}% · ₹${ad.fine}/${ad.prison}d${ad.banish ? " · BANISH" : ""}`);
+  }
+  form.button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === Math.min(docket.length, 10)) return openCourt(player);
+  return openCase(player, docket[res.selection]);
+}
+
+async function openCase(player, k) {
+  const state = getState();
+  const kase = (state.security.cases ?? []).find((x) => x.id === k.id && x.status === "trial");
+  if (!kase) {
+    player.sendMessage("§7⚖️ That case has left the docket.");
+    return openDocket(player);
+  }
+  const ad = adviseSentence(state, kase);
+  const form = new ActionFormData()
+    .title("⚖️ Sentence")
+    .body(
+      `§f§l${kase.name}§r §7(${kase.id})\n§f${kase.suspect} §7— evidence §f${Math.round(kase.evidence)}%§7, filed day ${kase.day}\n` +
+      (kase.detail ? `§8${kase.detail}\n` : "") +
+      `§7Prior strikes: §f${ad.strikes} §7· tariff: fine §f₹${ad.fine}§7, prison §f${ad.prison}d` +
+      (ad.banish ? " §c· BANISHMENT advised (habitual)" : "")
+    )
+    .button(`🪙 Fine ₹${ad.fine}`)
+    .button(`⛓ Prison ${ad.prison} days`)
+    .button("§c🚫 Banish")
+    .button("§a⚖ Acquit")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 4) return openDocket(player);
+  if (!writ(player, state, "judge")) return openCase(player, kase);
+  const verdict = ["fine", "prison", "banish", "acquit"][res.selection];
+  const out = sentence(state, kase.id, verdict);
+  saveState();
+  player.sendMessage(out.ok ? out.line : `§c${out.reason}`);
+  if (out.ok) sting("gavel");
+  return openDocket(player);
+}
+
+async function openInvestigations(player) {
+  const state = getState();
+  const open = (state.security.cases ?? []).filter((k) => k.status === "rumored");
+  const lines = open.length
+    ? open.slice(0, 12).map((k) => `§8🌑 ${k.name} — ${k.suspect} §7(ev ${Math.round(k.evidence)}%, day ${k.day})`).join("\n")
+    : "§8No whispers. Either the town is honest or the constables are blind.";
+  const form = new ActionFormData()
+    .title("🌑 Investigations")
+    .body(`${lines}\n\n§7Guards, soldiers & inspectors grind evidence toward the 60% trial line. Post them at 🛡️ Royal Guard.`)
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (!res.canceled) return openCourt(player);
+}
+
+async function openFugitives(player) {
+  const state = getState();
+  const fugitives = state.citizens.filter((c) => c.alive && c.fugitive);
+  const lines = fugitives.length
+    ? fugitives.map((c) => {
+        const b = (state.security.bounties ?? []).find((x) => x.citizenId === c.id);
+        return `§c🥷 ${c.fullName} §7${b ? `(bounty ₹${b.amount})` : "(no bounty)"}`;
+      }).join("\n")
+    : "§8No fugitives at large. The roads are safe for honest boots.";
+  const form = new ActionFormData().title("🥷 Fugitives & bounties").body(`${lines}\n\n§7Bounty hunters drag the named back in chains; constables sharpen their odds.`);
+  for (const c of fugitives.slice(0, 10)) form.button(`🥷 ${c.fullName}`);
+  form.button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === Math.min(fugitives.length, 10)) return openCourt(player);
+  return openBounty(player, fugitives[res.selection]);
+}
+
+async function openBounty(player, c) {
+  const state = getState();
+  const form = new ModalFormData()
+    .title(`🥷 ${c.fullName}`)
+    .slider("Bounty in rupees (adds to any standing bounty)", 10, 300, 10, 50);
+  const res = await form.show(player);
+  if (res.canceled) return openFugitives(player);
+  if (!writ(player, state, "bounty")) return openFugitives(player);
+  const out = postBounty(state, c.id, Number(res.formValues[0]));
+  saveState();
+  player.sendMessage(out.ok ? `§6🥷 Bounty posted on ${c.fullName} (₹${Number(res.formValues[0])}).` : `§c${out.reason}`);
+  return openFugitives(player);
+}
+
+async function openLaws(player) {
+  const state = getState();
+  const laws = state.security.laws;
+  const rows = Object.entries(laws)
+    .filter(([k]) => k !== "banishAfter")
+    .map(([k, t]) => `§7${cap(k)}: §ffine ₹${t.fine} §7/ ⛓ ${t.prison}d`).join("\n");
+  const form = new ActionFormData()
+    .title("📜 Laws of the realm")
+    .body(`${rows}\n§7Banishment advised after §f${laws.banishAfter} §7strikes.\n\n§7The tariff guides every sentence — harsh laws deter, harsh courts embitter.`)
+    .button("✒️ Amend the tariff")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 1) return openCourt(player);
+  if (!writ(player, state, "laws")) return openCourt(player);
+  const crimes = Object.keys(laws).filter((k) => k !== "banishAfter");
+  const edit = new ModalFormData().title("✒️ Amend the tariff").dropdown("Crime", crimes.map(cap), 0);
+  edit.slider("Fine (₹)", 0, 200, 5, 20);
+  edit.slider("Prison (days)", 0, 10, 1, 2);
+  const r2 = await edit.show(player);
+  if (r2.canceled) return openLaws(player);
+  const key = crimes[Number(r2.formValues[0])];
+  laws[key] = { fine: Number(r2.formValues[1]), prison: Number(r2.formValues[2]) };
+  saveState();
+  player.sendMessage(`§7📜 ${cap(key)}: fine ₹${laws[key].fine}, prison ${laws[key].prison}d. So it is written.`);
+  return openLaws(player);
+}
+
+async function openWatch(player) {
+  const state = getState();
+  const guards = guardRoster(state);
+  const militia = militiaCount(state);
+  const doctors = doctorRoster(state);
+  const lines =
+    `§7Rating §f${securityRating(state)}/100 §7· guards §f${guards.length} §7· militia §f${militia} §7· doctors §f${doctors.length}\n` +
+    (guards.length ? guards.slice(0, 8).map((g) => `§8🛡️ ${g.fullName} §7(L${g.level})`).join("\n") : "§8No guards posted. The night belongs to whoever wants it.");
+  const form = new ActionFormData()
+    .title("🛡️ Royal Guard")
+    .body(`${lines}\n\n§7Guards patrol by day, stand alternating night watches, solve cases and turn raids. Militia musters in a hurry (₹5 bonus each).`)
+    .button("➕ Post a guard (₹12/day)")
+    .button("➖ Recall a guard")
+    .button("🔍 Post an inspector (₹18/day)")
+    .button("⚔️ Conscript militia")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 4) return openCourt(player);
+  if (!writ(player, state, res.selection === 3 ? "muster" : "military")) return openWatch(player);
+  if (res.selection === 0) return pickCitizen(player, "Post guard", "Choose a living adult for the watch:", (s, id) => postGuard(s, id), openWatch);
+  if (res.selection === 1) {
+    const names = guards.map((g) => g.fullName);
+    if (!names.length) {
+      player.sendMessage("§7No guards to recall.");
+      return openWatch(player);
+    }
+    const f = new ModalFormData().title("Recall guard").dropdown("Guard", names, 0);
+    const r = await f.show(player);
+    if (r.canceled) return openWatch(player);
+    recallGuard(state, guards[Number(r.formValues[0])].id);
+    saveState();
+    player.sendMessage("§7🛡️ They hang up the musket and take up their old trade.");
+    return openWatch(player);
+  }
+  if (res.selection === 2) return pickCitizen(player, "Post inspector", "Choose a sharp-eyed auditor of officials:", (s, id) => postInspector(s, id), openWatch);
+  const f = new ModalFormData().title("⚔️ Conscript militia").slider("Muster (₹5 bonus each, 5 days)", 1, 12, 1, 4);
+  const r = await f.show(player);
+  if (r.canceled) return openWatch(player);
+  const out = conscript(state, Number(r.formValues[0]));
+  saveState();
+  player.sendMessage(out.ok ? `§6🛡️ ${Number(r.formValues[0])} militia mustered for 5 days.` : `§c${out.reason}`);
+  if (out.ok) sting("trumpet");
+  return openWatch(player);
+}
+
+/** Generic living-adult picker running an action, then returning to `back`. */
+async function pickCitizen(player, title, label, action, back) {
+  const state = getState();
+  const pool = state.citizens.filter((c) => c.alive && c.ageStage === "adult" && c.role !== "minister" && c.status !== "prisoner");
+  if (!pool.length) {
+    player.sendMessage("§7No eligible citizens.");
+    return back(player);
+  }
+  const f = new ModalFormData().title(title).dropdown(label, pool.map((c) => `${c.fullName} (${c.profession})`), 0);
+  const r = await f.show(player);
+  if (r.canceled) return back(player);
+  const out = action(state, pool[Number(r.formValues[0])].id);
+  saveState();
+  player.sendMessage(out.ok ? `§a${pool[Number(r.formValues[0])].fullName} takes up the post.` : `§c${out.reason}`);
+  return back(player);
+}
+
+/* ---------------- Sky & Research (M10) ---------------- */
+
+async function openSky(player) {
+  const state = getState();
+  const cl = state.climate;
+  const sick = state.citizens.filter((c) => c.alive && (c.sick ?? 0) > 0).length;
+  const cur = state.tech.current;
+  const lines =
+    `§7${seasonIcon(cl.season)} ${cl.season} ${cl.seasonDay}/10, Year ${cl.year} · ${weatherIcon(cl.weather)} ${cl.weather}\n` +
+    `§7🤒 sick §f${sick} §7· 🩺 doctors §f${doctorRoster(state).length} §7· 🍞 granary §f${state.foodStock}` +
+    (state.hungerDays > 0 ? ` §c(famine day ${state.hungerDays})` : "") + `\n` +
+    `§7🔬 RP banked §f${Math.floor(state.tech.rp ?? 0)} §7(+${dailyRP(state)}/day)` +
+    (cur ? ` · inquiry §f${cur.id} ${Math.floor(cur.progress)}/${cur.needed}` : " · §8no inquiry") + `\n` +
+    `§7🎪 festival ${state.festivalDay === state.day ? "§aTODAY" : "§8—"} §7· 🍞 rationing ${state.rationing ? "§6ON" : "§8off"} §7· 🤒 quarantine ${state.quarantine ? "§6ON" : "§8off"}`;
+  const form = new ActionFormData()
+    .title("🌦 Sky & Research")
+    .body(lines)
+    .button("🔬 Research tree")
+    .button("🎪 Proclaim festival")
+    .button(`${state.rationing ? "🍞 End rationing" : "🍞 Begin rationing"}`)
+    .button(`${state.quarantine ? "🤒 Lift quarantine" : "🤒 Declare quarantine"}`)
+    .button("⚰ Graveyard")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled) return;
+  switch (res.selection) {
+    case 0: return openResearch(player);
+    case 1: {
+      if (!writ(player, state, "decree")) return openSky(player);
+      const out = proclaimFestival(state);
+      saveState();
+      player.sendMessage(out.ok ? `§a🎪 FESTIVAL! Bells, feasts (${out.food} rations), no shifts — the town rejoices.` : `§c${out.reason}`);
+      if (out.ok) sting("festival");
+      return openSky(player);
+    }
+    case 2:
+      if (!writ(player, state, "rates")) return openSky(player);
+      state.rationing = !state.rationing;
+      saveState();
+      player.sendMessage(state.rationing ? "§6🍞 Rationing ON — half bread, twice the days." : "§a🍞 Rationing OFF — full plates.");
+      return openSky(player);
+    case 3:
+      if (!writ(player, state, "rates")) return openSky(player);
+      state.quarantine = !state.quarantine;
+      saveState();
+      player.sendMessage(state.quarantine ? "§6🤒 Quarantine ON — sickness spreads half as fast." : "§a🤒 Quarantine lifted.");
+      return openSky(player);
+    case 4: return openGraveyard(player);
+    default: return openMainMenu(player);
+  }
+}
+
+async function openResearch(player) {
+  const state = getState();
+  const list = techList(state);
+  const lines = list.map((t) =>
+    `${t.unlocked ? "§a✅" : t.locked ? "§8🔒" : t.current ? "§b🔬" : "§7○"} ${t.icon} ${t.name} §7(${t.cost} RP${t.requires ? `, needs ${t.requires}` : ""})`
+  ).join("\n");
+  const form = new ActionFormData()
+    .title("🔬 Research")
+    .body(`${lines}\n\n§7RP banked §f${Math.floor(state.tech.rp ?? 0)} §7· +${dailyRP(state)}/day from schools & teachers · grants ₹10 → 1 RP.`)
+    .button("▶️ Choose inquiry")
+    .button("💰 Endow a grant")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled || res.selection === 2) return openSky(player);
+  if (res.selection === 0) {
+    const avail = list.filter((t) => !t.unlocked && !t.locked);
+    if (!avail.length) {
+      player.sendMessage("§7🔬 Nothing left to inquire — the age of wonders is complete.");
+      return openResearch(player);
+    }
+    const f = new ModalFormData().title("Choose inquiry").dropdown("Inquiry", avail.map((t) => `${t.icon} ${t.name} — ${t.desc}`), 0);
+    const r = await f.show(player);
+    if (r.canceled) return openResearch(player);
+    const out = startResearch(state, avail[Number(r.formValues[0])].id);
+    saveState();
+    player.sendMessage(out.ok ? `§b🔬 Inquiry begun: ${avail[Number(r.formValues[0])].name}.` : `§c${out.reason}`);
+    return openResearch(player);
+  }
+  const g = new ModalFormData().title("Endow research").slider("Grant (₹10 → 1 RP)", 10, 500, 10, 50);
+  const r = await g.show(player);
+  if (r.canceled) return openResearch(player);
+  const out = grantResearch(state, Number(r.formValues[0]));
+  saveState();
+  player.sendMessage(out.ok ? `§b🔬 Endowed ₹${Number(r.formValues[0])} (+${out.rp} RP).` : `§c${out.reason}`);
+  return openResearch(player);
+}
+
+async function openGraveyard(player) {
+  const state = getState();
+  const stones = state.graveyard ?? [];
+  const form = new ActionFormData()
+    .title("⚰ Graveyard")
+    .body(stones.length ? stones.slice(-12).map((s) => `§8🪦 ${s}`).join("\n") : "§8Green grass, no stones. Long may it wave.")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (!res.canceled) return openSky(player);
+}
+
+/* ---------------- Officers & Orders (M11) ---------------- */
+
+async function openOfficers(player) {
+  const state = getState();
+  const o = officerList(state);
+  const rows = Object.entries(OFFICER_ROLES)
+    .map(([r, def]) => `${def.icon} ${def.name}: §f${o.officers[r] ?? "— vacant —"}\n§8  ${def.writ}`).join("\n");
+  const form = new ActionFormData()
+    .title("🕯️ Officers & Orders")
+    .body(`§6👑 Crown: §f${o.crown ?? "unclaimed"}\n${rows}\n\n§7The Crown commissions & dismisses; officers execute their writ even when the Crown is away. With no officers, all hands may act.`)
+    .button("📜 Commission an officer")
+    .button("🗑 Dismiss an officer")
+    .button("❓ Chat orders (!help)")
+    .button("§8← Back");
+  const res = await form.show(player);
+  if (res.canceled) return;
+  switch (res.selection) {
+    case 0: {
+      if (!writ(player, state, "officers")) return openOfficers(player);
+      const roles = Object.keys(OFFICER_ROLES);
+      const f = new ModalFormData().title("Commission").dropdown("Office", roles.map((r) => `${OFFICER_ROLES[r].icon} ${OFFICER_ROLES[r].name}`), 0);
+      f.textField("Gamertag", "Steve");
+      const r = await f.show(player);
+      if (r.canceled) return openOfficers(player);
+      const out = grantOfficer(state, player.name, roles[Number(r.formValues[0])], String(r.formValues[1] ?? "").trim());
+      saveState();
+      player.sendMessage(out.ok ? `§a🕯️ Commissioned ${OFFICER_ROLES[roles[Number(r.formValues[0])]].name}.` : `§c${out.reason}`);
+      if (out.ok) sting("trumpet");
+      return openOfficers(player);
+    }
+    case 1: {
+      if (!writ(player, state, "officers")) return openOfficers(player);
+      const roles = Object.keys(OFFICER_ROLES);
+      const f = new ModalFormData().title("Dismiss").dropdown("Office", roles.map((r) => `${OFFICER_ROLES[r].icon} ${OFFICER_ROLES[r].name} — ${o.officers[r] ?? "vacant"}`), 0);
+      const r = await f.show(player);
+      if (r.canceled) return openOfficers(player);
+      revokeOfficer(state, player.name, roles[Number(r.formValues[0])]);
+      saveState();
+      player.sendMessage("§7🕯️ The seal is reclaimed.");
+      return openOfficers(player);
+    }
+    case 2: {
+      const lines = [
+        "§6!orders from chat §7— rule without the Scepter:",
+        "§f!status §7realm at a glance · §f!treasury §7coin & food",
+        "§f!docket §7cases ready · §f!judge k-3 fine §7sentence",
+        "§f!cases §7investigations · §f!bounty \"Name\" 50",
+        "§f!decide §7list, §f!decide x-1 grand §7rule",
+        "§f!muster 4 §7militia · §f!guards §7the watch",
+        "§f!festival §7/ §f!ration §7/ §f!quarantine",
+        "§f!tech §7research · §f!officers §7the court",
+        "§f!grant marshal Steve §7(Crown) · §f!revoke marshal",
+      ];
+      for (const l of lines) player.sendMessage(l);
+      return openOfficers(player);
+    }
+    default: return openMainMenu(player);
+  }
 }
 
 /* ---------------- helpers ---------------- */

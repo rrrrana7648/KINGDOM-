@@ -78,6 +78,49 @@ function tickOne(record, entity, state, tick) {
     return;
   }
 
+  // The chain gang & the fevered stay put: prisoners break stone in the
+  // abstract (see tickPrison), the sick rest at home (see tickHealth).
+  if (record.status === "prisoner") {
+    decayNeeds(record, 0.02);
+    const a = anchor(state);
+    if (a) walkToward(entity, a, { arrive: 3.0, speed: 0.5 });
+    refreshNameTag(record, entity, "§8⛓");
+    return;
+  }
+  if ((record.sick ?? 0) > 0) {
+    decayNeeds(record, 0.015);
+    const home = homeAnchor(record, state);
+    if (home && distanceXZ(entity.location, home) > 2.4) {
+      walkToward(entity, home, { arrive: 2.0, speed: 0.6 });
+    } else {
+      record.needs.rest = Math.min(100, record.needs.rest + 0.3);
+    }
+    refreshNameTag(record, entity, "§e🤒");
+    return;
+  }
+
+  // 🎪 Festival day: the whole town takes leisure — except the watch.
+  if (state.festivalDay === state.day) {
+    if (record.profession === "guard" || record.profession === "soldier") {
+      phaseWork(record, entity, state, tick); // the watch never feasts
+      return;
+    }
+    if (record.ageStage !== "adult") return tickChild(record, entity, state, hour, tick);
+    return phaseLeisure(record, entity, state, tick);
+  }
+
+  // ✊ Strike days: the shifts stand idle — guards, clerks & doctors exempt.
+  if ((state.strikeDays ?? 0) > 0 && record.ageStage === "adult" &&
+      !["guard", "soldier", "buyer", "doctor"].includes(record.profession) &&
+      hour >= 7.5 && hour < 17.5) {
+    decayNeeds(record, 0.02);
+    const a = anchor(state);
+    if (a) walkToward(entity, a, { arrive: 3.5, speed: 0.5 });
+    record.needs.leisure = Math.min(100, record.needs.leisure + 0.1);
+    refreshNameTag(record, entity, "§6✊");
+    return;
+  }
+
   // Children live by the nursery clock, not the shift bell.
   if (record.ageStage !== "adult") return tickChild(record, entity, state, hour, tick);
 
@@ -90,7 +133,24 @@ function tickOne(record, entity, state, tick) {
   else if (hour >= 13 && hour < 17.5) phaseWork(record, entity, state, tick);
   else if (hour >= 17.5 && hour < 18.5) phaseDeliver(record, entity, state);
   else if (hour >= 18.5 && hour < 21) phaseLeisure(record, entity, state, tick);
+  else if (onNightWatch(record, state)) phaseWatch(record, entity, state, tick);
   else phaseSleep(record, entity, state);
+}
+
+/** Half the watch patrols each night, alternating by day. */
+function onNightWatch(record, state) {
+  if (record.profession !== "guard" && record.profession !== "soldier") return false;
+  let hash = state.day;
+  for (const ch of record.id) hash += ch.charCodeAt(0);
+  return hash % 2 === 0;
+}
+
+/** 🌙 Night watch: patrol the anchor while the town sleeps. */
+function phaseWatch(record, entity, state, tick) {
+  decayNeeds(record, 0.02);
+  performWork(record, state, tick); // patrolDuty under the hood
+  record.needs.rest = Math.max(0, record.needs.rest - 0.05); // broken sleep
+  refreshNameTag(record, entity, "§9🌙");
 }
 
 /* ---------------- childhood (M7) ---------------- */
@@ -170,6 +230,14 @@ function homeAnchor(record, state) {
 function childMeal(record, state, mealKey) {
   if (record.day[mealKey]) return;
   record.day[mealKey] = true;
+  // 🍞 Rationing: thin gruel alternates — no granary draw, half comfort.
+  record.day.thin = !record.day.thin;
+  if (state.rationing && record.day.thin) {
+    record.day.meals++;
+    state.dailyStats.mealsEaten++;
+    record.needs.food = Math.min(100, record.needs.food + 17);
+    return;
+  }
   if (state.foodStock >= 1) {
     state.foodStock--;
     record.day.meals++;
@@ -332,6 +400,14 @@ function consumeMeal(record, state) {
     hour >= 6 && hour < 7.5 ? "breakfast" : hour >= 12 && hour < 13 ? "lunch" : "dinner";
   if (record.day[mealKey]) return;
   record.day[mealKey] = true;
+  // 🍞 Rationing: thin gruel alternates — no granary draw, half comfort.
+  record.day.thin = !record.day.thin;
+  if (state.rationing && record.day.thin) {
+    record.day.meals++;
+    state.dailyStats.mealsEaten++;
+    record.needs.food = Math.min(100, record.needs.food + 17);
+    return;
+  }
   if (state.foodStock >= 1) {
     state.foodStock--;
     record.day.meals++;

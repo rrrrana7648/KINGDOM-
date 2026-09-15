@@ -63,6 +63,11 @@ function freshRecord(state, entity, { name, sex, role, profession }) {
     mood: role === "minister" ? 90 : 78,
     health: 20,
     status: "following",
+    honesty: 40 + Math.floor(Math.random() * 56), // M9: 40–95
+    strikes: 0, // M9: prior convictions
+    fugitive: false, // M9: fled justice
+    sick: 0, // M10: fever days remaining
+    quarantined: false, // M10: individual isolation
     needs: { food: 100, rest: 100, leisure: 100, safety: 100 },
     day: {
       meals: 0, slept: false, workedTicks: 0, leisureTicks: 0,
