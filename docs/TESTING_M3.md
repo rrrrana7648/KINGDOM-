@@ -1,4 +1,4 @@
-# ✅ M3 manual test checklist — Crown Warehouse economy (Bedrock 1.21.60+)
+# ✅ M3 manual test checklist — Crown Warehouse economy (Bedrock 1.21.100+)
 
 Prereqs: M1–M2 working (founding, released workers, work sites).
 

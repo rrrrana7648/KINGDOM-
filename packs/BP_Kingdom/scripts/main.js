@@ -5,12 +5,17 @@
  * M4–M8: the Day Roll settles the full economy (market, taxes, GDP, mint,
  * bank, decrees, construction, family, missions, harbor); deaths settle
  * wills & inheritance (M7).
+ * M12.1: stable-API hardening — every engine surface used here exists in
+ * @minecraft/server 2.1.0 / @minecraft/server-ui 2.0.0 (Bedrock 1.21.100+).
+ * Chat orders ride `/kingdom:order …` (stable custom command) and, where a
+ * build also exposes the beta `chatSend` event, plain `!orders` in chat.
  */
 import {
   world,
   system,
   Player,
   CommandPermissionLevel,
+  CustomCommandParamType,
   CustomCommandStatus,
 } from "@minecraft/server";
 import { getState, saveState } from "./core/state.js";
@@ -25,13 +30,44 @@ import { buyerForCitizen } from "./economy/buyers.js";
 import { parseCommand } from "./game/commands.js";
 import { sting } from "./core/sounds.js";
 
-/* ---------------- /kingdom:start ---------------- */
+const TAG = "§6[KINGDOM] §7";
+
+/** Runs a chat order for a player and prints the reply. */
+function runOrder(player, text) {
+  const state = getState();
+  if (!state.founded) {
+    player.sendMessage(`${TAG}No kingdom yet. Run §f/kingdom:start§7.`);
+    return;
+  }
+  try {
+    const out = parseCommand(state, player.name, text);
+    if (!out) {
+      player.sendMessage(`${TAG}Say an order, e.g. §f/kingdom:order status§7 or §f/kingdom:order help§7.`);
+      return;
+    }
+    for (const line of out.lines) player.sendMessage(line);
+    if (out.mutated) saveState();
+  } catch (err) {
+    console.warn(`[KINGDOM] order failed: ${err}`);
+    try { player.sendMessage("§cThe clerks misheard that order."); } catch { /* */ }
+  }
+}
+
+/** The player behind a custom command, if any. */
+function commandPlayer(origin) {
+  const source = origin?.initiator ?? origin?.sourceEntity;
+  return source instanceof Player ? source : undefined;
+}
+
+/* ---------------- Custom commands (stable since 2.1.0) ---------------- */
 system.beforeEvents.startup.subscribe((event) => {
   const registry = event.customCommandRegistry;
   if (!registry) {
     console.warn("[KINGDOM] customCommandRegistry unavailable on this build");
     return;
   }
+
+  // /kingdom:start — found the colony.
   registry.registerCommand(
     {
       name: "kingdom:start",
@@ -40,11 +76,56 @@ system.beforeEvents.startup.subscribe((event) => {
       cheatsRequired: false,
     },
     (origin) => {
-      const source = origin.initiator ?? origin.sourceEntity;
+      const player = commandPlayer(origin);
+      if (!player) return { status: CustomCommandStatus.Failure, message: "Only a player may found a kingdom." };
+      system.run(() => startFounding(player));
+      return { status: CustomCommandStatus.Success };
+    }
+  );
+
+  // /kingdom:menu — open the Kingdom Menu without the Scepter (and re-issue it).
+  registry.registerCommand(
+    {
+      name: "kingdom:menu",
+      description: "Open the Kingdom Menu (and restore a lost Royal Scepter)",
+      permissionLevel: CommandPermissionLevel.Any,
+      cheatsRequired: false,
+    },
+    (origin) => {
+      const player = commandPlayer(origin);
+      if (!player) return { status: CustomCommandStatus.Failure, message: "Only a player may hold court." };
       system.run(() => {
-        if (source instanceof Player) startFounding(source);
+        if (getState().founded) ensureScepter(player);
+        openMainMenu(player);
       });
-      return { status: CustomCommandStatus.Success, message: "" };
+      return { status: CustomCommandStatus.Success };
+    }
+  );
+
+  // /kingdom:order <order> [a] [b] [c] [d] — chat orders on the stable API.
+  // Words are separate optional parameters so players need no quotes:
+  //   /kingdom:order judge k-3 fine
+  registry.registerCommand(
+    {
+      name: "kingdom:order",
+      description: "Rule from the keyboard: /kingdom:order help",
+      permissionLevel: CommandPermissionLevel.Any,
+      cheatsRequired: false,
+      mandatoryParameters: [{ name: "order", type: CustomCommandParamType.String }],
+      optionalParameters: [
+        { name: "a", type: CustomCommandParamType.String },
+        { name: "b", type: CustomCommandParamType.String },
+        { name: "c", type: CustomCommandParamType.String },
+        { name: "d", type: CustomCommandParamType.String },
+      ],
+    },
+    (origin, ...args) => {
+      const player = commandPlayer(origin);
+      if (!player) return { status: CustomCommandStatus.Failure, message: "Only a player may give orders." };
+      const words = args.filter((w) => typeof w === "string" && w.length > 0);
+      const text = "!" + words.join(" ").replace(/^!+/, "");
+      system.run(() => runOrder(player, text));
+      return { status: CustomCommandStatus.Success };
     }
   );
 });
@@ -57,28 +138,21 @@ world.afterEvents.itemUse.subscribe((event) => {
   }
 });
 
-/* ---------------- Chat orders (M11: !help) ---------------- */
-world.beforeEvents.chatSend.subscribe((event) => {
-  const text = event.message ?? "";
-  if (!text.startsWith("!")) return;
-  const state = getState();
-  if (state.options?.chatOrders === false) return; // throne ignores !orders
-  event.cancel = true;
-  if (!state.founded) {
-    event.sender.sendMessage("§6[KINGDOM] §7No kingdom yet. Run §f/kingdom:start§7.");
-    return;
-  }
-  system.run(() => {
-    try {
-      const out = parseCommand(state, event.sender.name, text);
-      for (const line of out.lines) event.sender.sendMessage(line);
-      if (out.mutated) saveState();
-    } catch (err) {
-      console.warn(`[KINGDOM] chat order failed: ${err}`);
-      try { event.sender.sendMessage("§cThe clerks misheard that order."); } catch { /* */ }
-    }
+/* ---------------- Chat orders (!help) — beta builds only ---------------- */
+// `chatSend` is not part of the stable module; when a build exposes it we
+// intercept `!orders` in chat too. Otherwise /kingdom:order carries them.
+const chatSend = world.beforeEvents.chatSend;
+if (chatSend && typeof chatSend.subscribe === "function") {
+  chatSend.subscribe((event) => {
+    const text = event.message ?? "";
+    if (!text.startsWith("!")) return;
+    const state = getState();
+    if (state.options?.chatOrders === false) return; // throne ignores !orders
+    event.cancel = true;
+    const sender = event.sender;
+    system.run(() => runOrder(sender, text));
   });
-});
+}
 
 /* ---------------- (Re)load housekeeping ---------------- */
 world.afterEvents.playerSpawn.subscribe((event) => {
@@ -96,7 +170,12 @@ world.afterEvents.playerSpawn.subscribe((event) => {
 world.afterEvents.entityDie.subscribe((event) => {
   const state = getState();
   if (!state.founded) return;
-  const record = recordForEntity(state, event.deadEntity);
+  let record;
+  try {
+    record = recordForEntity(state, event.deadEntity);
+  } catch {
+    return; // the entity was already gone
+  }
   if (!record) return;
   record.alive = false;
   record.status = "deceased";
@@ -157,4 +236,4 @@ system.runInterval(() => {
   if (state.founded) saveState();
 }, 100);
 
-console.log("[KINGDOM] M12 loaded — courts, seasons, research, officers & chat orders (!help).");
+console.log("[KINGDOM] M12.1 loaded — /kingdom:start · /kingdom:menu · /kingdom:order help");

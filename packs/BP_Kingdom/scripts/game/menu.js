@@ -261,7 +261,7 @@ async function changeProfession(player, c) {
   const current = Math.max(0, PROFESSIONS.indexOf(c.profession));
   const form = new ModalFormData()
     .title(`🔁 ${c.fullName}`)
-    .dropdown("New profession", PROFESSIONS.map(cap), current);
+    .dropdown("New profession", PROFESSIONS.map(cap), { defaultValueIndex: current });
   const res = await form.show(player);
   if (res.canceled) return openCitizen(player, c);
   const job = PROFESSIONS[Number(res.formValues[0])];
@@ -426,13 +426,13 @@ async function openBuyerDetail(player, b) {
   const res = await form.show(player);
   if (res.canceled || res.selection === 4) return openBuyers(player);
   if (res.selection === 0) {
-    const m = new ModalFormData().title("Daily float").slider("Float in ₹ (funded each dawn)", 0, 500, 5, b.maxFloat);
+    const m = new ModalFormData().title("Daily float").slider("Float in ₹ (funded each dawn)", 0, 500, { valueStep: 5, defaultValue: b.maxFloat });
     const r = await m.show(player);
     if (!r.canceled) { b.maxFloat = Number(r.formValues[0]); saveState(); }
     return openBuyerDetail(player, b);
   }
   if (res.selection === 1) {
-    const m = new ModalFormData().title("Daily quota").slider("Max units bought per day", 8, 512, 8, b.quota);
+    const m = new ModalFormData().title("Daily quota").slider("Max units bought per day", 8, 512, { valueStep: 8, defaultValue: b.quota });
     const r = await m.show(player);
     if (!r.canceled) { b.quota = Number(r.formValues[0]); saveState(); }
     return openBuyerDetail(player, b);
@@ -630,13 +630,13 @@ async function openTaxLevers(player) {
   const t = state.tax;
   const form = new ModalFormData()
     .title("🎚 Tax levers")
-    .slider("Income tax %", 0, 40, 1, t.incomePct)
-    .slider("Sales tax %", 0, 30, 1, t.salesPct)
-    .slider("Head tax ₹/adult/day", 0, 5, 1, t.headTax)
-    .slider("Land tax %", 0, 20, 1, t.landPct)
-    .slider("Import duty %", 0, 30, 1, t.importPct)
-    .slider("Export duty %", 0, 20, 1, t.exportPct)
-    .slider("⚔ War surcharge %", 0, 20, 1, t.war);
+    .slider("Income tax %", 0, 40, { valueStep: 1, defaultValue: t.incomePct })
+    .slider("Sales tax %", 0, 30, { valueStep: 1, defaultValue: t.salesPct })
+    .slider("Head tax ₹/adult/day", 0, 5, { valueStep: 1, defaultValue: t.headTax })
+    .slider("Land tax %", 0, 20, { valueStep: 1, defaultValue: t.landPct })
+    .slider("Import duty %", 0, 30, { valueStep: 1, defaultValue: t.importPct })
+    .slider("Export duty %", 0, 20, { valueStep: 1, defaultValue: t.exportPct })
+    .slider("⚔ War surcharge %", 0, 20, { valueStep: 1, defaultValue: t.war });
   const res = await form.show(player);
   if (res.canceled) return openTreasury(player);
   const v = res.formValues.map(Number);
@@ -671,7 +671,7 @@ async function openMintBank(player) {
   if (res.selection >= 3 && res.selection <= 7 && !writ(player, state, "spend")) return openMintBank(player);
   switch (res.selection) {
     case 0: {
-      const m = new ModalFormData().title("📄 Mill paper").slider("Paper units", 1, 20, 1, 5);
+      const m = new ModalFormData().title("📄 Mill paper").slider("Paper units", 1, 20, { valueStep: 1, defaultValue: 5 });
       const r = await m.show(player);
       if (!r.canceled) {
         const out = makePaper(state, Number(r.formValues[0]));
@@ -681,7 +681,7 @@ async function openMintBank(player) {
       return openMintBank(player);
     }
     case 1: {
-      const m = new ModalFormData().title("🖤 Grind ink").slider("Ink sacs", 1, 10, 1, 2);
+      const m = new ModalFormData().title("🖤 Grind ink").slider("Ink sacs", 1, 10, { valueStep: 1, defaultValue: 2 });
       const r = await m.show(player);
       if (!r.canceled) {
         const out = makeInk(state, Number(r.formValues[0]));
@@ -697,7 +697,7 @@ async function openMintBank(player) {
       return openMintBank(player);
     }
     case 3: {
-      const m = new ModalFormData().title("🖨 Print banknotes").slider("₹100 batches", 1, 10, 1, 1);
+      const m = new ModalFormData().title("🖨 Print banknotes").slider("₹100 batches", 1, 10, { valueStep: 1, defaultValue: 1 });
       const r = await m.show(player);
       if (!r.canceled) {
         const out = printNotes(state, Number(r.formValues[0]));
@@ -712,8 +712,8 @@ async function openMintBank(player) {
     case 5: return openCrownDebt(player);
     case 6: {
       const m = new ModalFormData().title("📊 Interest rates")
-        .slider("Citizen loans %/10d", 0, 30, 1, state.bank.citizenRate)
-        .slider("Crown debt %/30d", 0, 20, 1, state.bank.crownRate);
+        .slider("Citizen loans %/10d", 0, 30, { valueStep: 1, defaultValue: state.bank.citizenRate })
+        .slider("Crown debt %/30d", 0, 20, { valueStep: 1, defaultValue: state.bank.crownRate });
       const r = await m.show(player);
       if (!r.canceled) {
         state.bank.citizenRate = Number(r.formValues[0]);
@@ -758,10 +758,10 @@ async function openLoan(player) {
   const loanMax = Math.max(10, Math.min(500, Math.floor(state.treasury)));
   const m = new ModalFormData()
     .title("🤝 New loan")
-    .dropdown("Borrower", adults.map((c) => c.fullName), 0)
-    .slider("Amount ₹", 10, loanMax, 10, Math.min(10, loanMax))
-    .dropdown("Purpose", ["personal", "house mortgage", "farm", "shop", "tools"], 0)
-    .slider("Term (days)", 2, 30, 1, 10);
+    .dropdown("Borrower", adults.map((c) => c.fullName), { defaultValueIndex: 0 })
+    .slider("Amount ₹", 10, loanMax, { valueStep: 10, defaultValue: Math.min(10, loanMax) })
+    .dropdown("Purpose", ["personal", "house mortgage", "farm", "shop", "tools"], { defaultValueIndex: 0 })
+    .slider("Term (days)", 2, 30, { valueStep: 1, defaultValue: 10 });
   const r = await m.show(player);
   if (r.canceled) return openLoan(player);
   const out = requestLoan(state, adults[Number(r.formValues[0])].id, Number(r.formValues[1]),
@@ -782,7 +782,7 @@ async function openCrownDebt(player) {
   const res = await form.show(player);
   if (res.canceled || res.selection === 2) return openMintBank(player);
   if (res.selection === 0) {
-    const m = new ModalFormData().title("📥 Borrow").slider("Amount ₹", 50, 2000, 50, 200);
+    const m = new ModalFormData().title("📥 Borrow").slider("Amount ₹", 50, 2000, { valueStep: 50, defaultValue: 200 });
     const r = await m.show(player);
     if (!r.canceled) {
       const out = borrowCrown(state, Number(r.formValues[0]));
@@ -790,7 +790,7 @@ async function openCrownDebt(player) {
       player.sendMessage(out.ok ? `§a📥 Borrowed ₹${Number(r.formValues[0])}. Debt ₹${Math.round(out.debt)}.` : `§c${out.reason}`);
     }
   } else {
-    const m = new ModalFormData().title("📤 Repay").slider("Amount ₹", 10, Math.max(10, Math.floor(Math.min(state.treasury, state.bank.crownDebt))), 10, 10);
+    const m = new ModalFormData().title("📤 Repay").slider("Amount ₹", 10, Math.max(10, Math.floor(Math.min(state.treasury, state.bank.crownDebt))), { valueStep: 10, defaultValue: 10 });
     const r = await m.show(player);
     if (!r.canceled) {
       const out = repayCrown(state, Number(r.formValues[0]));
@@ -831,7 +831,7 @@ async function openDecrees(player) {
   if (pick === 5) return openSites2(player);
   if (pick === 7) {
     const m = new ModalFormData().title("⚙ Hands-off budget")
-      .slider("Auto-approve new wages up to ₹/day", 0, 500, 10, state.autoApproveBudget ?? 50);
+      .slider("Auto-approve new wages up to ₹/day", 0, 500, { valueStep: 10, defaultValue: state.autoApproveBudget ?? 50 });
     const r = await m.show(player);
     if (!r.canceled) {
       state.autoApproveBudget = Number(r.formValues[0]);
@@ -869,7 +869,7 @@ async function openDecreeDetail(player, d) {
   const res = await form.show(player);
   if (res.canceled || res.selection === 2) return openDecrees(player);
   if (res.selection === 0 && d.kind === "custom") {
-    const m = new ModalFormData().title("Progress").slider("Progress %", 0, 100, 5, d.progress);
+    const m = new ModalFormData().title("Progress").slider("Progress %", 0, 100, { valueStep: 5, defaultValue: d.progress });
     const r = await m.show(player);
     if (!r.canceled) {
       d.progress = Number(r.formValues[0]);
@@ -894,10 +894,10 @@ async function openNewDecree(player, kind) {
     const ids = Object.keys(BUILDINGS);
     const m = new ModalFormData()
       .title("🏗 Build decree")
-      .dropdown("Building", ids.map((id) => `${BUILDINGS[id].icon} ${BUILDINGS[id].name} — ${BUILDINGS[id].desc}`), 0)
-      .slider("Level", 1, 3, 1, 1)
-      .slider("Deadline (days)", 2, 30, 1, 7)
-      .slider("Budget ₹", 0, 500, 10, 50);
+      .dropdown("Building", ids.map((id) => `${BUILDINGS[id].icon} ${BUILDINGS[id].name} — ${BUILDINGS[id].desc}`), { defaultValueIndex: 0 })
+      .slider("Level", 1, 3, { valueStep: 1, defaultValue: 1 })
+      .slider("Deadline (days)", 2, 30, { valueStep: 1, defaultValue: 7 })
+      .slider("Budget ₹", 0, 500, { valueStep: 10, defaultValue: 50 });
     const r = await m.show(player);
     if (r.canceled) return openDecrees(player);
     const id = ids[Number(r.formValues[0])];
@@ -919,9 +919,9 @@ async function openNewDecree(player, kind) {
   }
   if (kind === "recruit") {
     const m = new ModalFormData().title("📯 Recruit decree")
-      .slider("Settlers wanted", 1, 20, 1, 4)
-      .slider("Deadline (days)", 3, 30, 1, 8)
-      .slider("Budget ₹", 0, 500, 10, 100);
+      .slider("Settlers wanted", 1, 20, { valueStep: 1, defaultValue: 4 })
+      .slider("Deadline (days)", 3, 30, { valueStep: 1, defaultValue: 8 })
+      .slider("Budget ₹", 0, 500, { valueStep: 10, defaultValue: 100 });
     const r = await m.show(player);
     if (r.canceled) return openDecrees(player);
     const out = createDecree(state, {
@@ -936,10 +936,10 @@ async function openNewDecree(player, kind) {
   if (kind === "produce") {
     const items = ["minecraft:oak_log", "minecraft:cobblestone", "minecraft:wheat", "minecraft:coal", "minecraft:raw_iron", "minecraft:sugar_cane"];
     const m = new ModalFormData().title("📦 Stockpile decree")
-      .dropdown("Commodity", items.map(short), 0)
-      .slider("Target quantity", 16, 1024, 16, 128)
-      .slider("Deadline (days)", 2, 30, 1, 7)
-      .slider("Budget ₹", 0, 500, 10, 30);
+      .dropdown("Commodity", items.map(short), { defaultValueIndex: 0 })
+      .slider("Target quantity", 16, 1024, { valueStep: 16, defaultValue: 128 })
+      .slider("Deadline (days)", 2, 30, { valueStep: 1, defaultValue: 7 })
+      .slider("Budget ₹", 0, 500, { valueStep: 10, defaultValue: 30 });
     const r = await m.show(player);
     if (r.canceled) return openDecrees(player);
     const item = items[Number(r.formValues[0])];
@@ -955,8 +955,8 @@ async function openNewDecree(player, kind) {
   if (kind === "tax") {
     const names = Object.keys(TAX_PRESETS);
     const m = new ModalFormData().title("💰 Tax edict")
-      .dropdown("Preset", names.map(cap), 3)
-      .slider("Duration (days)", 1, 30, 1, 14);
+      .dropdown("Preset", names.map(cap), { defaultValueIndex: 3 })
+      .slider("Duration (days)", 1, 30, { valueStep: 1, defaultValue: 14 });
     const r = await m.show(player);
     if (r.canceled) return openDecrees(player);
     const out = createDecree(state, {
@@ -969,9 +969,9 @@ async function openNewDecree(player, kind) {
     return openDecrees(player);
   }
   const m = new ModalFormData().title("📜 Custom decree")
-    .textField("Title", "e.g. Prepare defenses", "Prepare defenses")
-    .slider("Deadline (days)", 1, 30, 1, 7)
-    .slider("Budget ₹", 0, 500, 10, 50);
+    .textField("Title", "e.g. Prepare defenses", { defaultValue: "Prepare defenses" })
+    .slider("Deadline (days)", 1, 30, { valueStep: 1, defaultValue: 7 })
+    .slider("Budget ₹", 0, 500, { valueStep: 10, defaultValue: 50 });
   const r = await m.show(player);
   if (r.canceled) return openDecrees(player);
   const out = createDecree(state, {
@@ -1051,9 +1051,9 @@ async function openFamily(player) {
   if (res.selection === 2) return openChildRequest(player);
   if (res.selection === 3) return openHouses(player);
   const m = new ModalFormData().title("🏠 Register house")
-    .textField("House name", "e.g. Carter House", "")
-    .slider("Beds", 1, 12, 1, 2)
-    .slider("Rent ₹/bed/night (Crown)", 0, 5, 1, 1);
+    .textField("House name", "e.g. Carter House", { defaultValue: "" })
+    .slider("Beds", 1, 12, { valueStep: 1, defaultValue: 2 })
+    .slider("Rent ₹/bed/night (Crown)", 0, 5, { valueStep: 1, defaultValue: 1 });
   const r = await m.show(player);
   if (r.canceled) return openFamily(player);
   const house = registerHouse(state, {
@@ -1073,7 +1073,7 @@ async function openMatchmaker(player, preselect = 0) {
     return openFamily(player);
   }
   const m = new ModalFormData().title("💒 Matchmaker (₹9 fee)")
-    .dropdown("First heart", singles.map((c) => c.fullName), Math.min(preselect, singles.length - 1));
+    .dropdown("First heart", singles.map((c) => c.fullName), { defaultValueIndex: Math.min(preselect, singles.length - 1) });
   const r = await m.show(player);
   if (r.canceled) return openFamily(player);
   const me = singles[Number(r.formValues[0])];
@@ -1108,7 +1108,7 @@ async function openChildRequest(player) {
     return openFamily(player);
   }
   const m = new ModalFormData().title("👶 Child request")
-    .dropdown("Requester", adults.map((c) => `${c.fullName}${c.spouse ? " (wed)" : ""}`), 0);
+    .dropdown("Requester", adults.map((c) => `${c.fullName}${c.spouse ? " (wed)" : ""}`), { defaultValueIndex: 0 });
   const r = await m.show(player);
   if (r.canceled) return openFamily(player);
   const a = adults[Number(r.formValues[0])];
@@ -1188,7 +1188,7 @@ async function openHarbor(player) {
   if (res.selection === 0) return openExport(player);
   if (res.selection === 1) return openImports(player);
   const m = new ModalFormData().title("📯 Recruiter mission")
-    .slider("Settlers wanted", 1, 20, 1, 4);
+    .slider("Settlers wanted", 1, 20, { valueStep: 1, defaultValue: 4 });
   const r = await m.show(player);
   if (r.canceled) return openHarbor(player);
   const count = Number(r.formValues[0]);
@@ -1218,8 +1218,8 @@ async function openExport(player) {
     return openHarbor(player);
   }
   const m = new ModalFormData().title(`📤 Export — ${ship.name}`)
-    .dropdown("Goods", stocked.map(([id, n]) => `${short(id)} ×${n}`), 0)
-    .slider("Quantity", 1, 256, 1, 16);
+    .dropdown("Goods", stocked.map(([id, n]) => `${short(id)} ×${n}`), { defaultValueIndex: 0 })
+    .slider("Quantity", 1, 256, { valueStep: 1, defaultValue: 16 });
   const r = await m.show(player);
   if (r.canceled) return openHarbor(player);
   const [item] = stocked[Number(r.formValues[0])];
@@ -1330,10 +1330,9 @@ async function openPopulationPolicy(player) {
   const modeIndex = state.populationPolicy.mode === "fixed" ? 1 : state.populationPolicy.mode === "autogrow" ? 2 : 0;
   const form = new ModalFormData()
     .title("📈 Growth Policy")
-    .dropdown("Growth mode",
-      ["Unlimited — grow as conditions allow", "Fixed cap — stop at the cap", "Auto-grow — steady rate over time"], modeIndex)
-    .slider("Fixed cap (if chosen)", 5, 200, 1, state.populationPolicy.cap)
-    .slider("Auto-grow: adults per 10 days", 1, 10, 1, state.populationPolicy.growPer10Days);
+    .dropdown("Growth mode", ["Unlimited — grow as conditions allow", "Fixed cap — stop at the cap", "Auto-grow — steady rate over time"], { defaultValueIndex: modeIndex })
+    .slider("Fixed cap (if chosen)", 5, 200, { valueStep: 1, defaultValue: state.populationPolicy.cap })
+    .slider("Auto-grow: adults per 10 days", 1, 10, { valueStep: 1, defaultValue: state.populationPolicy.growPer10Days });
   const res = await form.show(player);
   if (res.canceled) return;
   state.populationPolicy = {
@@ -1496,7 +1495,7 @@ async function openBounty(player, c) {
   const state = getState();
   const form = new ModalFormData()
     .title(`🥷 ${c.fullName}`)
-    .slider("Bounty in rupees (adds to any standing bounty)", 10, 300, 10, 50);
+    .slider("Bounty in rupees (adds to any standing bounty)", 10, 300, { valueStep: 10, defaultValue: 50 });
   const res = await form.show(player);
   if (res.canceled) return openFugitives(player);
   if (!writ(player, state, "bounty")) return openFugitives(player);
@@ -1521,9 +1520,9 @@ async function openLaws(player) {
   if (res.canceled || res.selection === 1) return openCourt(player);
   if (!writ(player, state, "laws")) return openCourt(player);
   const crimes = Object.keys(laws).filter((k) => k !== "banishAfter");
-  const edit = new ModalFormData().title("✒️ Amend the tariff").dropdown("Crime", crimes.map(cap), 0);
-  edit.slider("Fine (₹)", 0, 200, 5, 20);
-  edit.slider("Prison (days)", 0, 10, 1, 2);
+  const edit = new ModalFormData().title("✒️ Amend the tariff").dropdown("Crime", crimes.map(cap), { defaultValueIndex: 0 });
+  edit.slider("Fine (₹)", 0, 200, { valueStep: 5, defaultValue: 20 });
+  edit.slider("Prison (days)", 0, 10, { valueStep: 1, defaultValue: 2 });
   const r2 = await edit.show(player);
   if (r2.canceled) return openLaws(player);
   const key = crimes[Number(r2.formValues[0])];
@@ -1559,7 +1558,7 @@ async function openWatch(player) {
       player.sendMessage("§7No guards to recall.");
       return openWatch(player);
     }
-    const f = new ModalFormData().title("Recall guard").dropdown("Guard", names, 0);
+    const f = new ModalFormData().title("Recall guard").dropdown("Guard", names, { defaultValueIndex: 0 });
     const r = await f.show(player);
     if (r.canceled) return openWatch(player);
     recallGuard(state, guards[Number(r.formValues[0])].id);
@@ -1568,7 +1567,7 @@ async function openWatch(player) {
     return openWatch(player);
   }
   if (res.selection === 2) return pickCitizen(player, "Post inspector", "Choose a sharp-eyed auditor of officials:", (s, id) => postInspector(s, id), openWatch);
-  const f = new ModalFormData().title("⚔️ Conscript militia").slider("Muster (₹5 bonus each, 5 days)", 1, 12, 1, 4);
+  const f = new ModalFormData().title("⚔️ Conscript militia").slider("Muster (₹5 bonus each, 5 days)", 1, 12, { valueStep: 1, defaultValue: 4 });
   const r = await f.show(player);
   if (r.canceled) return openWatch(player);
   const out = conscript(state, Number(r.formValues[0]));
@@ -1586,7 +1585,7 @@ async function pickCitizen(player, title, label, action, back) {
     player.sendMessage("§7No eligible citizens.");
     return back(player);
   }
-  const f = new ModalFormData().title(title).dropdown(label, pool.map((c) => `${c.fullName} (${c.profession})`), 0);
+  const f = new ModalFormData().title(title).dropdown(label, pool.map((c) => `${c.fullName} (${c.profession})`), { defaultValueIndex: 0 });
   const r = await f.show(player);
   if (r.canceled) return back(player);
   const out = action(state, pool[Number(r.formValues[0])].id);
@@ -1667,7 +1666,7 @@ async function openResearch(player) {
       player.sendMessage("§7🔬 Nothing left to inquire — the age of wonders is complete.");
       return openResearch(player);
     }
-    const f = new ModalFormData().title("Choose inquiry").dropdown("Inquiry", avail.map((t) => `${t.icon} ${t.name} — ${t.desc}`), 0);
+    const f = new ModalFormData().title("Choose inquiry").dropdown("Inquiry", avail.map((t) => `${t.icon} ${t.name} — ${t.desc}`), { defaultValueIndex: 0 });
     const r = await f.show(player);
     if (r.canceled) return openResearch(player);
     const out = startResearch(state, avail[Number(r.formValues[0])].id);
@@ -1675,7 +1674,7 @@ async function openResearch(player) {
     player.sendMessage(out.ok ? `§b🔬 Inquiry begun: ${avail[Number(r.formValues[0])].name}.` : `§c${out.reason}`);
     return openResearch(player);
   }
-  const g = new ModalFormData().title("Endow research").slider("Grant (₹10 → 1 RP)", 10, 500, 10, 50);
+  const g = new ModalFormData().title("Endow research").slider("Grant (₹10 → 1 RP)", 10, 500, { valueStep: 10, defaultValue: 50 });
   const r = await g.show(player);
   if (r.canceled) return openResearch(player);
   const out = grantResearch(state, Number(r.formValues[0]));
@@ -1715,7 +1714,7 @@ async function openOfficers(player) {
     case 0: {
       if (!writ(player, state, "officers")) return openOfficers(player);
       const roles = Object.keys(OFFICER_ROLES);
-      const f = new ModalFormData().title("Commission").dropdown("Office", roles.map((r) => `${OFFICER_ROLES[r].icon} ${OFFICER_ROLES[r].name}`), 0);
+      const f = new ModalFormData().title("Commission").dropdown("Office", roles.map((r) => `${OFFICER_ROLES[r].icon} ${OFFICER_ROLES[r].name}`), { defaultValueIndex: 0 });
       f.textField("Gamertag", "Steve");
       const r = await f.show(player);
       if (r.canceled) return openOfficers(player);
@@ -1728,7 +1727,7 @@ async function openOfficers(player) {
     case 1: {
       if (!writ(player, state, "officers")) return openOfficers(player);
       const roles = Object.keys(OFFICER_ROLES);
-      const f = new ModalFormData().title("Dismiss").dropdown("Office", roles.map((r) => `${OFFICER_ROLES[r].icon} ${OFFICER_ROLES[r].name} — ${o.officers[r] ?? "vacant"}`), 0);
+      const f = new ModalFormData().title("Dismiss").dropdown("Office", roles.map((r) => `${OFFICER_ROLES[r].icon} ${OFFICER_ROLES[r].name} — ${o.officers[r] ?? "vacant"}`), { defaultValueIndex: 0 });
       const r = await f.show(player);
       if (r.canceled) return openOfficers(player);
       revokeOfficer(state, player.name, roles[Number(r.formValues[0])]);

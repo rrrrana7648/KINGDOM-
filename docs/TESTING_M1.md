@@ -1,4 +1,4 @@
-# ✅ M1 manual test checklist (Android Bedrock 1.21.60+)
+# ✅ M1 manual test checklist (Android Bedrock 1.21.100+)
 
 After importing `dist/KINGDOM.mcaddon` and enabling **both** packs on a new world:
 
