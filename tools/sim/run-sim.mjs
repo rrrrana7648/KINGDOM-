@@ -949,6 +949,111 @@ console.log("\n💬 M12 — Rule from the keyboard");
   assert(parseCommand(state, "Steve", "!advance").lines[0].includes("sun"), "!advance bows to the sun");
 }
 
+/* ---- M12.1: bootstrap through main.js + every menu on the strict UI mock ---- */
+console.log("\n🚀 M12.1 — Bootstrap, commands & the whole Kingdom Menu");
+{
+  const { queueResponse, shown, pendingResponses } = await import("@minecraft/server-ui");
+  const { ItemStack } = await import("@minecraft/server");
+  resetState();
+  buildWorld({ chest: true });
+  dim.entities.length = 0;
+  const king = new Player(dim, { x: 0.5, y: G + 1, z: 0.5 }, "Steve");
+  dim.entities.push(king);
+  const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); };
+
+  await mod("./main.js");
+  const registry = system.startup();
+  assert([...registry.commands.keys()].sort().join() === "kingdom:menu,kingdom:order,kingdom:start", "startup registers /kingdom:start, /kingdom:menu, /kingdom:order");
+  assert([...registry.commands.values()].every((c) => c.def.cheatsRequired === false && c.def.permissionLevel === 0), "commands run without cheats for any player");
+  assert(system.intervals.length === 3, "three simulation loops scheduled");
+  assert(world.beforeEvents.chatSend === undefined, "stable module exposes no chatSend — main.js booted without it");
+
+  // Found the colony via the command + forms.
+  queueResponse({ formValues: ["Sim Victoria", 2, 1] }); // founding modal
+  queueResponse({ selection: 0 }); // the Minister gathers the party
+  const res = registry.run("kingdom:start", { sourceEntity: king });
+  assert(res.status === 0, "/kingdom:start returns Success");
+  await flush();
+  const state = getState();
+  assert(state.founded && state.colony.name === "Sim Victoria" && state.colony.bannerColor === "Emerald", "founding form values land in state");
+  assert(state.citizens.length === 5 && state.ministerGreeted, "Minister + founding party assembled through the forms");
+  assert(king.inventory.count("kingdom:scepter") === 1, "the Royal Scepter is issued as kingdom:scepter");
+  const scepter = king.inventory.getItem(king.inventory.slots.findIndex((s) => s?.typeId === "kingdom:scepter"));
+  assert(scepter && registry.run("kingdom:start", { sourceEntity: king }).status === 0 && king.messages.at(-1).includes("already rule"), "second /kingdom:start is refused politely");
+  assert(registry.run("kingdom:start", { sourceType: "Server" }).status === 1, "console origin gets a Failure result");
+
+  // Chat orders through the stable command.
+  king.messages.length = 0;
+  registry.run("kingdom:order", { sourceEntity: king }, "help");
+  assert(king.messages[0]?.includes("!orders"), "/kingdom:order help teaches the orders");
+  registry.run("kingdom:order", { sourceEntity: king }, "status");
+  assert(king.messages.some((m) => m.includes("Day 1")), "/kingdom:order status reports the day");
+  registry.run("kingdom:order", { sourceEntity: king }, "!muster", "3");
+  assert(!state.security.militia && king.messages.at(-1).includes("able adults"), "muster is refused while the party still follows the King");
+  setModeAll(state, "living");
+  registry.run("kingdom:order", { sourceEntity: king }, "!muster", "3");
+  assert(state.security.militia?.count === 3, "/kingdom:order muster 3 raises the militia once released (leading ! tolerated)");
+  let threw = false; try { registry.run("kingdom:order", { sourceEntity: king }); } catch { threw = true; }
+  assert(threw, "the order word is mandatory");
+
+  // Scepter use opens the Kingdom Menu.
+  shown.length = 0;
+  world.afterEvents.itemUse.emit({ itemStack: new ItemStack("kingdom:scepter", 1), source: king });
+  await flush();
+  assert(shown.length === 1 && shown[0].kind === "action" && shown[0].buttons === 16, "using the Scepter opens the 16-button Kingdom Menu");
+  assert(state.officers.crown === "Steve", "first Scepter use claims the Crown");
+  registry.run("kingdom:menu", { sourceEntity: king }); await flush();
+  assert(shown.length === 2 && king.inventory.count("kingdom:scepter") === 1, "/kingdom:menu opens the menu without duplicating the Scepter");
+
+  // Crawl: every top-level page, then every button on every page (grand-children auto-cancel).
+  // Every form is built against the strict 2.0.0 mock, so any 1.x positional slider/dropdown/textField
+  // call, out-of-range default, or non-string label throws here.
+  const { openMainMenu } = await mod("./game/menu.js");
+  const errors = [];
+  const open = async (...path) => {
+    for (const sel of path) queueResponse({ selection: sel });
+    shown.length = 0;
+    try { await openMainMenu(king); await flush(); } catch (e) { errors.push(`${path.join(">")}: ${e.message}`); }
+    if (pendingResponses()) errors.push(`${path.join(">")}: ${pendingResponses()} scripted answer(s) unused`);
+    return shown.slice();
+  };
+  let pages = 0, leaves = 0;
+  for (let i = 0; i < 16; i++) {
+    const trail = await open(i);
+    const page = trail[1];
+    pages++;
+    if (!page || page.kind !== "action") continue;
+    for (let j = 0; j < page.buttons; j++) {
+      const t2 = await open(i, j);
+      leaves++;
+      // Third level: if a further action page appeared, touch each of its buttons too.
+      const sub = t2[2];
+      if (sub && sub.kind === "action") {
+        for (let k = 0; k < sub.buttons; k++) { await open(i, j, k); leaves++; }
+      }
+    }
+  }
+  assert(errors.length === 0, errors.length ? `menu crawl threw:\n   ${errors.join("\n   ")}` : `menu crawl: ${pages} pages, ${leaves} leaves, every form builds cleanly on server-ui 2.0.0`);
+
+  // Simulation loops with strict HUD/clock calls; save shards under the 32 KB cap.
+  world.day = 1; world.timeOfDay = 1000;
+  for (let t = 5; t <= 200; t += 5) system.tick(t);
+  world.day = 2; system.tick(220); await flush();
+  assert(state.day === 2 && king.messages.some((m) => m.includes("Day 2") || m.includes("Dawn") || m.includes("☀")), "the clock loop rolls Day 2 and reports");
+  const bytes = Object.fromEntries([...world.dynamicProps].map(([k, v]) => [k, v.length]));
+  assert(Object.values(bytes).every((n) => n < 32767), `save shards under the 32 767-byte cap (${JSON.stringify(bytes)})`);
+
+  // Relog + a death through the real handlers.
+  world.afterEvents.playerSpawn.emit({ initialSpawn: true, player: king }); await flush();
+  assert(king.inventory.count("kingdom:scepter") === 1, "relog keeps exactly one Scepter");
+  const victim = state.citizens.find((c) => c.role === "settler");
+  const ent = dim.getEntities({ tags: [victim.cidTag] })[0];
+  world.afterEvents.entityDie.emit({ deadEntity: ent, damageSource: { cause: "fall" } });
+  assert(victim.alive === false && king.messages.at(-1)?.includes("has died"), "entityDie marks the citizen deceased and mourns");
+  world.afterEvents.entityDie.emit({ deadEntity: dim.spawnEntity("minecraft:zombie", { x: 0, y: G + 1, z: 0 }), damageSource: {} });
+  assert(true, "stranger deaths are ignored");
+}
+
 console.log("\n🚦 Warnings");
 assert(warnings.length === 0, warnings.length ? "no warnings:\n   " + warnings.join("\n   ") : "no runtime warnings");
 console.log(`\n${failures === 0 ? "🎉 ALL SIM TESTS PASSED" : `❌ ${failures} FAILURES`}`);

@@ -2,17 +2,17 @@
   "format_version": 2,
   "header": {
     "name": "KINGDOM Behavior Pack",
-    "description": "Rule a living Victorian colony. \u00a76/kingdom:start \u00a7rto found your kingdom.",
+    "description": "Rule a living Victorian colony. §6/kingdom:start §rto found your kingdom. Needs Bedrock 1.21.100+.",
     "uuid": "2a1333df-1f9f-4254-9422-0feb3a41b245",
     "version": [
       0,
       12,
-      0
+      1
     ],
     "min_engine_version": [
       1,
       21,
-      60
+      100
     ]
   },
   "modules": [
@@ -23,7 +23,7 @@
       "version": [
         0,
         12,
-        0
+        1
       ],
       "entry": "scripts/main.js"
     }
@@ -42,8 +42,15 @@
       "version": [
         0,
         12,
-        0
+        1
       ]
     }
-  ]
+  ],
+  "metadata": {
+    "authors": [
+      "rrrrana7648"
+    ],
+    "license": "All rights reserved",
+    "product_type": "addon"
+  }
 }

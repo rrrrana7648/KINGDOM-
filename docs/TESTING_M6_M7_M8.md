@@ -1,4 +1,4 @@
-# ✅ M6–M8 manual test checklist — Decrees, Families, Harbor (Bedrock 1.21.60+)
+# ✅ M6–M8 manual test checklist — Decrees, Families, Harbor (Bedrock 1.21.100+)
 
 Prereqs: M1–M5 working (economy, taxes, mint). Builders/laborers released to live & work.
 

@@ -1,4 +1,4 @@
-# ✅ M2 manual test checklist (Android Bedrock 1.21.60+)
+# ✅ M2 manual test checklist (Android Bedrock 1.21.100+)
 
 Prereq: M1 complete (`/kingdom:start`, 4 settlers + Minister, Royal Scepter).
 

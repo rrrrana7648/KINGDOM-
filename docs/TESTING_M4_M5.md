@@ -1,4 +1,4 @@
-# ✅ M4–M5 manual test checklist — Market, Taxes, Mint & Bank (Bedrock 1.21.60+)
+# ✅ M4–M5 manual test checklist — Market, Taxes, Mint & Bank (Bedrock 1.21.100+)
 
 Prereqs: M1–M3 working (founding, released workers, work sites, a buyer stall or two).
 

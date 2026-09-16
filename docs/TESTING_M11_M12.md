@@ -17,11 +17,18 @@ Manual in-game checklist. Headless coverage: `node --loader ./loader.mjs run-sim
    - marriage/child approvals + festival refuse ("belongs to the Chamberlain");
    - the matching officer succeeds; the Crown always succeeds.
 5. **Dismissal**: dismiss the Magistrate — their gavel writ dies immediately.
-6. **Chat orders**: say `!help`, then run every order: `!status !treasury !mood
-   !docket !cases !guards !tech !officers !judge !bounty !muster !festival !ration
-   !quarantine !decide !grant !revoke !advance`. Gated orders honor writs
-   (Bob's `!judge` refuses once a Magistrate exists).
-7. **Toggles**: ⏰ Clock → chat orders OFF — `!status` is ignored (normal chat).
+6. **Chat orders** (stable path): run `/kingdom:order help`, then every order:
+   `/kingdom:order status`, `treasury`, `mood`, `docket`, `cases`, `guards`, `tech`,
+   `officers`, `judge k-1 fine`, `bounty Name 50`, `muster 4`, `festival`, `ration`,
+   `quarantine`, `decide`, `grant marshal Bob`, `revoke marshal`, `advance`. Gated orders
+   honor writs (Bob's `judge` refuses once a Magistrate exists). Commands work with
+   cheats OFF. On beta-API builds only, `!status` typed in chat does the same.
+7. **Toggles**: ⏰ Clock → chat orders OFF — `!status` (beta builds) is ignored; the
+   `/kingdom:order` command keeps working.
+8. **Lost Scepter**: drop it in lava → `/kingdom:menu` opens the menu and re-issues one
+   Scepter (never two — check with a second `/kingdom:menu`).
+9. **Content log** (Settings → Creator → Enable content log GUI): after joining the
+   world and opening every top-level menu page there must be **zero** KINGDOM errors.
    Sound stings OFF — verdicts/festivals/dawns fall silent.
 
 ## M12 — Art, stings, packaging

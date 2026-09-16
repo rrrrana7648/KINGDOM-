@@ -23,9 +23,9 @@ export async function startFounding(player) {
 
   const form = new ModalFormData()
     .title("🏰 Found Your Kingdom")
-    .textField("Colony name", "e.g. New Victoria", "New Victoria")
-    .dropdown("Banner colour", COLORS, 1)
-    .dropdown("Difficulty", DIFFICULTIES, 1);
+    .textField("Colony name", "e.g. New Victoria", { defaultValue: "New Victoria" })
+    .dropdown("Banner colour", COLORS, { defaultValueIndex: 1 })
+    .dropdown("Difficulty", DIFFICULTIES, { defaultValueIndex: 1 });
 
   let res;
   try {
@@ -109,6 +109,8 @@ export async function greetMinister(player) {
   player.onScreenDisplay.setTitle("§6§lThe Founding Party", {
     subtitle: "§72 men · 2 women · 1 Minister",
     stayDuration: 60,
+    fadeInDuration: 10,
+    fadeOutDuration: 20,
   });
   for (const c of settlers) {
     player.sendMessage(

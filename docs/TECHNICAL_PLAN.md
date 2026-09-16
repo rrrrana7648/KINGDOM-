@@ -6,7 +6,7 @@ _Bedrock Add-on (Behavior Pack + Resource Pack), plain JavaScript ES modules, no
 
 | Piece | Version | Notes |
 |---|---|---|
-| Minecraft Bedrock (Android) | **1.21.60+** | stable Script API |
+| Minecraft Bedrock (Android) | **1.21.100+** | `@minecraft/server` 2.1.0 + `@minecraft/server-ui` 2.0.0 (stable; custom commands, options-object forms) |
 | `@minecraft/server` | **2.1.0** (manifest dep) | custom commands stable since 2.1.0 |
 | `@minecraft/server-ui` | **2.0.0** | ActionFormData / ModalFormData |
 | Language | JavaScript ESM | TypeScript optional later; plain JS ships directly |
